@@ -1,0 +1,488 @@
+/* ------------------------------------------------------------------
+   Infomaatti – Bug Breaker
+   Bright cartoon HUD in the Angry-Birds style: blue wooden-sign panels,
+   yellow score numbers, an ammo bar with five cards at the bottom.
+   Everything is scoped under .game-root.bug-breaker.
+   ------------------------------------------------------------------ */
+
+.game-root.bug-breaker {
+  --accent: #ff7a1a;
+  --accent-2: #ffd400;
+  --bg: #5ec8ff;
+  --bb-panel: linear-gradient(180deg, #3d8fe0 0%, #1f63b8 55%, #174c9a 100%);
+  --bb-panel-border: #0e3268;
+  --bb-yellow: #ffd23f;
+  --bb-brown: #3a1d08;
+  background: #5ec8ff;
+}
+
+.bug-breaker .game-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+/* ---------- top HUD ------------------------------------------------ */
+.bug-breaker .bb-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  padding-left: 46px;
+}
+
+.bug-breaker .bb-top__right {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.bug-breaker .bb-chip {
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0;
+  min-width: 92px;
+  min-height: 48px;
+  padding: 4px 12px 5px;
+  border-radius: 12px;
+  background: var(--bb-panel);
+  border: 2px solid var(--bb-panel-border);
+  box-shadow:
+    0 4px 0 #0b2550,
+    0 8px 16px rgba(0, 0, 0, 0.3),
+    inset 0 1px 0 rgba(255, 255, 255, 0.25);
+}
+
+.bug-breaker .bb-chip .chip__label {
+  color: #fff;
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.35);
+}
+
+.bug-breaker .bb-chip .chip__value {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--bb-yellow);
+  font-size: 24px;
+  line-height: 1.05;
+  text-shadow:
+    0 2px 0 rgba(0, 0, 0, 0.35),
+    0 0 10px rgba(255, 210, 63, 0.25);
+}
+
+.bug-breaker .bb-chip--level .chip__value {
+  color: #fff;
+  font-size: 20px;
+}
+
+.bug-breaker .bb-chip svg {
+  width: 20px;
+  height: 20px;
+}
+
+.bug-breaker .bb-chip--pulse .chip__value {
+  animation: bb-pop 0.35s ease-out;
+}
+
+@keyframes bb-pop {
+  0% {
+    transform: scale(1.3);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+.bug-breaker .bb-iconbtn {
+  width: 46px;
+  min-height: 46px;
+  border-radius: 12px;
+  background: var(--bb-panel);
+  border: 2px solid var(--bb-panel-border);
+  color: #fff;
+  box-shadow:
+    0 4px 0 #0b2550,
+    0 8px 16px rgba(0, 0, 0, 0.3);
+}
+
+.bug-breaker .bb-iconbtn:active {
+  transform: translateY(3px);
+  box-shadow: 0 1px 0 #0b2550;
+}
+
+/* ---------- ammo bar ----------------------------------------------- */
+.bug-breaker .bb-ammo {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: max(10px, env(safe-area-inset-bottom));
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  pointer-events: none;
+}
+
+.bug-breaker .bb-ammo__cards {
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 0 8px;
+}
+
+.bug-breaker .bb-card {
+  position: relative;
+  width: 94px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  border-radius: 16px;
+  background: var(--bb-panel);
+  border: 3px solid rgba(255, 255, 255, 0.22);
+  box-shadow:
+    0 5px 0 #0b2550,
+    0 10px 20px rgba(0, 0, 0, 0.3),
+    inset 0 1px 0 rgba(255, 255, 255, 0.3);
+  transition:
+    transform 0.2s ease,
+    opacity 0.2s ease,
+    border-color 0.2s ease,
+    box-shadow 0.2s ease;
+}
+
+.bug-breaker .bb-card.is-empty {
+  opacity: 0.45;
+  filter: saturate(0.5);
+}
+
+.bug-breaker .bb-card.is-current {
+  border-color: #ffe14a;
+  transform: translateY(-6px) scale(1.04);
+  box-shadow:
+    0 0 0 2px #ffe14a,
+    0 5px 0 #0b2550,
+    0 0 22px rgba(255, 225, 74, 0.75),
+    inset 0 1px 0 rgba(255, 255, 255, 0.3);
+  opacity: 1;
+  filter: none;
+}
+
+.bug-breaker .bb-card__icon {
+  width: 100%;
+  padding: 6px 12px 2px;
+}
+
+.bug-breaker .bb-card__icon svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  filter: drop-shadow(0 4px 4px rgba(0, 0, 0, 0.35));
+}
+
+.bug-breaker .bb-card__name {
+  width: 100%;
+  padding: 3px 0 4px;
+  border-radius: 0 0 12px 12px;
+  background: rgba(5, 20, 50, 0.45);
+  color: #fff;
+  font-family: var(--font-display);
+  font-size: 15px;
+  font-weight: 800;
+  text-align: center;
+  letter-spacing: 0.04em;
+  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.4);
+}
+
+.bug-breaker .bb-card__count {
+  position: absolute;
+  top: -9px;
+  right: -9px;
+  min-width: 26px;
+  height: 26px;
+  padding: 0 6px;
+  border-radius: 13px;
+  display: grid;
+  place-items: center;
+  background: var(--bb-yellow);
+  color: var(--bb-brown);
+  border: 2px solid var(--bb-brown);
+  font-family: var(--font-display);
+  font-size: 14px;
+  font-weight: 800;
+  line-height: 1;
+  box-shadow: 0 2px 0 rgba(0, 0, 0, 0.3);
+}
+
+.bug-breaker .bb-card__desc {
+  margin: 6px 0 0;
+  padding: 0 2px;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1.15;
+  text-align: center;
+  text-shadow:
+    0 1px 0 #1b3e6e,
+    0 -1px 0 #1b3e6e,
+    1px 0 0 #1b3e6e,
+    -1px 0 0 #1b3e6e,
+    0 2px 4px rgba(0, 0, 0, 0.5);
+}
+
+.bug-breaker .bb-ammo__desc {
+  display: none;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 800;
+  text-align: center;
+  text-shadow:
+    0 1px 0 #1b3e6e,
+    0 -1px 0 #1b3e6e,
+    1px 0 0 #1b3e6e,
+    -1px 0 0 #1b3e6e,
+    0 2px 4px rgba(0, 0, 0, 0.5);
+}
+
+.bug-breaker .bb-ammo__desc b {
+  color: var(--bb-yellow);
+}
+
+/* ---------- overlays ----------------------------------------------- */
+.bug-breaker .overlay {
+  background: rgba(8, 36, 70, 0.4);
+  backdrop-filter: blur(3px);
+  -webkit-backdrop-filter: blur(3px);
+}
+
+.bug-breaker .overlay__card {
+  background: linear-gradient(180deg, rgba(16, 60, 116, 0.94) 0%, rgba(10, 38, 78, 0.96) 100%);
+  border: 2px solid rgba(255, 255, 255, 0.2);
+  box-shadow:
+    0 8px 0 rgba(6, 24, 52, 0.9),
+    0 24px 60px rgba(0, 0, 0, 0.45);
+}
+
+.bug-breaker .overlay__eyebrow {
+  background: #ff7a1a;
+  box-shadow: 0 3px 0 #a84a05;
+}
+
+.bug-breaker .overlay__title {
+  color: var(--bb-yellow);
+  -webkit-text-stroke: 1.5px #5a2e0c;
+  paint-order: stroke fill;
+  text-shadow:
+    0 4px 0 #7a3b0a,
+    0 8px 0 rgba(0, 0, 0, 0.25);
+}
+
+.bug-breaker .overlay__howto strong {
+  color: var(--bb-yellow);
+}
+
+.bug-breaker .btn--primary {
+  background: linear-gradient(180deg, #ff9a2a 0%, #ff6a12 100%);
+  box-shadow:
+    0 6px 0 #a63f06,
+    0 12px 30px rgba(0, 0, 0, 0.35);
+}
+
+.bug-breaker .btn--primary:active {
+  box-shadow: 0 2px 0 #a63f06;
+}
+
+.bug-breaker .bb-stars {
+  display: flex;
+  justify-content: center;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.bug-breaker .bb-stars svg {
+  width: 44px;
+  height: 44px;
+  filter: drop-shadow(0 3px 0 rgba(0, 0, 0, 0.35));
+  animation: bb-star 0.5s cubic-bezier(0.2, 1.6, 0.4, 1) both;
+}
+
+.bug-breaker .bb-stars svg:nth-child(2) {
+  animation-delay: 0.15s;
+}
+
+.bug-breaker .bb-stars svg:nth-child(3) {
+  animation-delay: 0.3s;
+}
+
+@keyframes bb-star {
+  from {
+    transform: scale(0) rotate(-30deg);
+  }
+  to {
+    transform: scale(1) rotate(0);
+  }
+}
+
+.bug-breaker .bb-ammo-preview {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.bug-breaker .bb-ammo-preview svg {
+  width: 34px;
+  height: 34px;
+  filter: drop-shadow(0 3px 3px rgba(0, 0, 0, 0.35));
+}
+
+.bug-breaker .bb-keys {
+  width: 100%;
+  margin-top: 6px;
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
+.bug-breaker .bb-keys kbd {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.12);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  font-family: var(--font-ui);
+  font-size: 11px;
+}
+
+/* keyboard hints make no sense on touch-only devices */
+@media (hover: none) and (pointer: coarse) {
+  .bug-breaker .bb-keys {
+    display: none;
+  }
+}
+
+/* ---------- phones ------------------------------------------------- */
+@media (max-width: 700px), (max-height: 520px) {
+  .bug-breaker .bb-top {
+    padding-left: 44px;
+  }
+
+  .bug-breaker .bb-chip {
+    min-width: 70px;
+    min-height: 42px;
+    padding: 3px 8px 4px;
+  }
+
+  .bug-breaker .bb-chip .chip__label {
+    font-size: 8px;
+  }
+
+  .bug-breaker .bb-chip .chip__value {
+    font-size: 19px;
+  }
+
+  .bug-breaker .bb-chip--level .chip__value {
+    font-size: 16px;
+  }
+
+  .bug-breaker .bb-chip svg {
+    width: 16px;
+    height: 16px;
+  }
+
+  .bug-breaker .bb-iconbtn,
+  .bug-breaker .hud .btn--icon {
+    width: 42px;
+    min-height: 42px;
+  }
+
+  .bug-breaker .bb-ammo {
+    gap: 4px;
+  }
+
+  .bug-breaker .bb-ammo__cards {
+    gap: 6px;
+  }
+
+  .bug-breaker .bb-card {
+    width: 66px;
+    border-radius: 12px;
+    border-width: 2px;
+  }
+
+  .bug-breaker .bb-card__icon {
+    padding: 5px 7px 2px;
+  }
+
+  .bug-breaker .bb-card__name {
+    font-size: 11px;
+    padding: 2px 0 3px;
+    border-radius: 0 0 9px 9px;
+  }
+
+  .bug-breaker .bb-card__count {
+    top: -7px;
+    right: -7px;
+    min-width: 20px;
+    height: 20px;
+    font-size: 11px;
+  }
+
+  .bug-breaker .bb-card__desc {
+    display: none;
+  }
+
+  .bug-breaker .bb-ammo__desc {
+    display: block;
+  }
+
+  .bug-breaker .bb-stars svg {
+    width: 36px;
+    height: 36px;
+  }
+}
+
+@media (max-height: 520px) {
+  .bug-breaker .bb-ammo {
+    bottom: 6px;
+    gap: 2px;
+  }
+
+  .bug-breaker .bb-card {
+    width: 58px;
+  }
+
+  .bug-breaker .bb-card__icon {
+    padding: 3px 9px 1px;
+  }
+
+  .bug-breaker .bb-ammo__desc {
+    font-size: 11px;
+  }
+
+  .bug-breaker .overlay__card {
+    padding: 14px 18px 14px;
+  }
+
+  .bug-breaker .overlay__howto {
+    margin-top: 8px;
+    padding: 8px 10px;
+    font-size: 12px;
+  }
+
+  .bug-breaker .overlay__stats {
+    margin-top: 8px;
+  }
+
+  .bug-breaker .overlay__actions {
+    margin-top: 10px;
+  }
+
+  .bug-breaker .bb-ammo-preview,
+  .bug-breaker .bb-keys {
+    display: none;
+  }
+}

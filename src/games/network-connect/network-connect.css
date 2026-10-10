@@ -1,0 +1,999 @@
+/* ------------------------------------------------------------------
+   C2 – Network Connect
+   Everything is scoped under .game-root.network-connect
+   ------------------------------------------------------------------ */
+.game-root.network-connect {
+  --nc-blue: #2fa8ff;
+  --nc-yellow: #ffd43b;
+  --nc-green: #37e36b;
+  --nc-red: #ff4a4a;
+  --nc-ink: #0b3d7a;
+  --nc-panel-bg: linear-gradient(180deg, rgba(22, 40, 92, 0.94) 0%, rgba(12, 24, 60, 0.94) 100%);
+  --nc-panel-border: rgba(96, 150, 255, 0.35);
+  --nc-card-bg: rgba(7, 15, 40, 0.62);
+  --nc-card-border: rgba(96, 150, 255, 0.2);
+  --nc-dim: #86b3ff;
+  font-family: var(--font-ui);
+}
+
+.network-connect .game-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.network-connect .nc-mute {
+  position: absolute;
+  top: max(10px, env(safe-area-inset-top));
+  right: max(10px, env(safe-area-inset-right));
+  z-index: 30;
+}
+
+/* ---------- layout grid ------------------------------------------- */
+.network-connect .nc-layout {
+  position: absolute;
+  inset: 0;
+  z-index: 10;
+  display: grid;
+  grid-template-columns: 256px minmax(0, 1fr) 256px;
+  grid-template-rows: 84px auto minmax(0, 1fr);
+  grid-template-areas:
+    'head head head'
+    'status board power'
+    'info board power';
+  gap: 12px 16px;
+  padding: 8px 18px 16px;
+  pointer-events: none;
+}
+
+.network-connect .nc-layout > * {
+  pointer-events: auto;
+  min-width: 0;
+  min-height: 0;
+}
+
+.network-connect .nc-board-slot {
+  grid-area: board;
+  pointer-events: none;
+}
+
+.network-connect .nc-panel {
+  background: var(--nc-panel-bg);
+  border: 1px solid var(--nc-panel-border);
+  border-radius: 20px;
+  box-shadow:
+    0 14px 34px rgba(0, 0, 0, 0.4),
+    inset 0 1px 0 rgba(255, 255, 255, 0.07),
+    0 0 0 1px rgba(0, 0, 0, 0.25);
+}
+
+/* ---------- header / brand ----------------------------------------- */
+.network-connect .nc-header {
+  grid-area: head;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 0 64px 0 56px;
+}
+
+.network-connect .nc-brand {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
+}
+
+.network-connect .nc-brand__mark {
+  font-family: var(--font-display);
+  font-weight: 800;
+  font-size: 66px;
+  line-height: 1;
+  letter-spacing: -0.04em;
+  display: flex;
+  align-items: baseline;
+  filter: drop-shadow(0 5px 0 rgba(0, 0, 0, 0.35)) drop-shadow(0 0 18px rgba(47, 168, 255, 0.35));
+}
+
+.network-connect .nc-brand__c {
+  color: #5fd3ff;
+  -webkit-text-stroke: 2.5px #0b4a8a;
+  paint-order: stroke fill;
+  text-shadow: 0 3px 0 #0b4a8a;
+}
+
+.network-connect .nc-brand__2 {
+  color: var(--nc-yellow);
+  -webkit-text-stroke: 2.5px #8a5a00;
+  paint-order: stroke fill;
+  text-shadow: 0 3px 0 #8a5a00;
+  font-size: 0.92em;
+  margin-left: 2px;
+}
+
+.network-connect .nc-brand__net {
+  width: 54px;
+  height: 54px;
+  flex: 0 0 auto;
+  filter: drop-shadow(0 0 6px rgba(79, 168, 255, 0.6));
+}
+
+.network-connect .nc-brand__title {
+  font-family: var(--font-display);
+  font-weight: 800;
+  font-size: 32px;
+  line-height: 0.95;
+  text-transform: uppercase;
+  letter-spacing: 0.01em;
+  color: #fff;
+  -webkit-text-stroke: 1.5px var(--nc-ink);
+  paint-order: stroke fill;
+  text-shadow:
+    0 3px 0 var(--nc-ink),
+    0 8px 18px rgba(0, 0, 0, 0.45);
+}
+
+.network-connect .nc-brand__tag {
+  margin-left: 10px;
+  font-size: 11px;
+  font-weight: 900;
+  line-height: 1.45;
+  letter-spacing: 0.26em;
+  text-transform: uppercase;
+  color: #5a8ad8;
+}
+
+.network-connect .nc-coins {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 16px 5px 7px;
+  border-radius: 999px;
+  background: linear-gradient(180deg, #1d3570, #0f1e48);
+  border: 2px solid #3f62b8;
+  box-shadow:
+    0 6px 18px rgba(0, 0, 0, 0.35),
+    inset 0 1px 0 rgba(255, 255, 255, 0.12);
+  font-family: var(--font-display);
+  font-weight: 800;
+  font-size: 24px;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.network-connect .nc-coins__star {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 40% 35%, #ffcf4a, #d98a00 72%);
+  box-shadow:
+    0 0 10px rgba(255, 212, 59, 0.5),
+    inset 0 -2px 0 rgba(0, 0, 0, 0.25);
+}
+
+.network-connect .nc-coins--status {
+  display: none;
+}
+
+/* ---------- status panel (level / moves / stars) ------------------ */
+.network-connect .nc-status {
+  grid-area: status;
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 10px;
+  padding: 14px 16px 12px;
+}
+
+.network-connect .nc-level {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.1;
+}
+
+.network-connect .nc-level b {
+  font-family: var(--font-display);
+  font-weight: 800;
+  font-size: 28px;
+  letter-spacing: 0.01em;
+  color: #fff;
+  text-shadow: 0 2px 0 rgba(0, 0, 0, 0.35);
+}
+
+.network-connect .nc-level span {
+  font-size: 15px;
+  font-weight: 800;
+  color: var(--nc-dim);
+}
+
+.network-connect .nc-moves {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  grid-template-areas:
+    'label value'
+    'stars stars';
+  align-items: center;
+  column-gap: 12px;
+  padding: 10px 14px;
+  border-radius: 14px;
+  background: var(--nc-card-bg);
+  border: 1px solid var(--nc-card-border);
+}
+
+.network-connect .nc-moves__label {
+  grid-area: label;
+  font-size: 13px;
+  font-weight: 900;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: #9fd0ff;
+}
+
+.network-connect .nc-moves__value {
+  grid-area: value;
+  text-align: right;
+  font-family: var(--font-display);
+  font-weight: 800;
+  font-size: 40px;
+  line-height: 1;
+  color: #fff;
+  text-shadow: 0 3px 0 rgba(0, 0, 0, 0.35);
+}
+
+.network-connect .nc-stars {
+  grid-area: stars;
+  justify-self: center;
+  display: inline-flex;
+  justify-content: center;
+  gap: 6px;
+  margin-top: 6px;
+  padding: 5px 16px;
+  border-radius: 999px;
+  background: linear-gradient(180deg, #ffd84f, #e59d16);
+  box-shadow:
+    0 3px 0 #8d5a00,
+    inset 0 1px 0 rgba(255, 255, 255, 0.5);
+}
+
+.network-connect .nc-star {
+  fill: #163a7a;
+  stroke: #4fa8ff;
+  stroke-width: 1.8;
+  stroke-linejoin: round;
+  filter: drop-shadow(0 1px 0 rgba(0, 0, 0, 0.3));
+  transition: transform 0.2s ease;
+}
+
+.network-connect .nc-star.is-on {
+  fill: #fff2a8;
+  stroke: #b86a00;
+  filter: drop-shadow(0 0 5px rgba(255, 230, 120, 0.9));
+  transform: scale(1.08);
+}
+
+.network-connect .nc-status__actions {
+  display: flex;
+  gap: 8px;
+}
+
+.network-connect .nc-small-btn {
+  flex: 1;
+  min-height: 34px;
+  padding: 0 10px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
+  font-family: var(--font-display);
+  font-weight: 800;
+  font-size: 15px;
+  cursor: pointer;
+  transition: transform 0.08s ease, background 0.15s ease;
+}
+
+.network-connect .nc-small-btn:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.16);
+}
+
+.network-connect .nc-small-btn:active:not(:disabled) {
+  transform: translateY(2px);
+}
+
+.network-connect .nc-small-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.network-connect .nc-strip {
+  display: none;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  gap: 14px;
+  align-items: center;
+}
+
+.network-connect .nc-strip li {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-family: var(--font-display);
+  font-weight: 800;
+  font-size: 15px;
+  line-height: 1;
+}
+
+.network-connect .nc-strip li span {
+  font-family: var(--font-ui);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--nc-dim);
+}
+
+.network-connect .nc-strip__latency b {
+  color: #ff8c8c;
+}
+
+/* ---------- info panel (goal / legend / challenges) ---------------- */
+.network-connect .nc-info {
+  grid-area: info;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  overflow: hidden auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(120, 170, 255, 0.35) transparent;
+}
+
+.network-connect .nc-card {
+  padding: 8px 10px 10px;
+  border-radius: 14px;
+  background: var(--nc-card-bg);
+  border: 1px solid var(--nc-card-border);
+  flex: 0 0 auto;
+}
+
+.network-connect .nc-card h3,
+.network-connect .nc-power h2 {
+  margin: 0 0 4px;
+  font-family: var(--font-display);
+  font-weight: 800;
+  font-size: 17px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #fff;
+  text-shadow: 0 2px 0 rgba(0, 0, 0, 0.35);
+}
+
+.network-connect .nc-goal {
+  margin: 0 0 6px;
+  font-size: 13.5px;
+  font-weight: 700;
+  line-height: 1.3;
+  color: #e6efff;
+}
+
+.network-connect .nc-c-green {
+  color: var(--nc-green);
+}
+
+.network-connect .nc-c-blue {
+  color: #5fd3ff;
+}
+
+.network-connect .nc-legend {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.network-connect .nc-legend li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  color: #fff;
+}
+
+.network-connect .nc-legend--row {
+  grid-template-columns: repeat(5, auto);
+  justify-content: space-between;
+  margin-top: 10px;
+}
+
+.network-connect .nc-legend--row li {
+  flex-direction: column;
+  gap: 4px;
+  font-size: 10px;
+  letter-spacing: 0.06em;
+}
+
+.network-connect .nc-challenges {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.network-connect .nc-challenges li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  font-weight: 800;
+  color: #e6efff;
+}
+
+.network-connect .nc-challenges li span {
+  flex: 1;
+}
+
+.network-connect .nc-challenges li em {
+  font-style: normal;
+  color: var(--nc-dim);
+}
+
+.network-connect .nc-latency {
+  margin: 6px 0 0;
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--nc-dim);
+}
+
+.network-connect .nc-latency.is-hot {
+  color: #ff8c8c;
+}
+
+.network-connect .nc-progress {
+  margin-top: auto;
+  flex: 0 0 auto;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--nc-dim);
+}
+
+.network-connect .nc-progress__bar {
+  margin-top: 6px;
+  height: 8px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.4);
+  overflow: hidden;
+}
+
+.network-connect .nc-progress__bar i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #37e36b, #4ff2ff);
+  box-shadow: 0 0 10px rgba(55, 227, 107, 0.7);
+  transition: width 0.3s ease;
+}
+
+/* ---------- power-ups --------------------------------------------- */
+.network-connect .nc-power {
+  grid-area: power;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px 14px 16px;
+}
+
+.network-connect .nc-power h2 {
+  text-align: center;
+  font-size: 22px;
+  margin-bottom: 2px;
+}
+
+.network-connect .nc-pu {
+  position: relative;
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 72px;
+  padding: 10px 12px;
+  border: 2px solid rgba(255, 255, 255, 0.22);
+  border-radius: 18px;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--pu) 85%, #fff) 0%, var(--pu) 35%, color-mix(in srgb, var(--pu) 62%, #000) 100%);
+  color: #fff;
+  text-align: left;
+  cursor: pointer;
+  box-shadow:
+    0 5px 0 color-mix(in srgb, var(--pu) 40%, #000),
+    0 12px 26px rgba(0, 0, 0, 0.4),
+    inset 0 1px 0 rgba(255, 255, 255, 0.35);
+  transition: transform 0.08s ease, filter 0.15s ease, box-shadow 0.15s ease;
+}
+
+.network-connect .nc-pu:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+
+.network-connect .nc-pu:active:not(:disabled) {
+  transform: translateY(3px);
+  box-shadow:
+    0 2px 0 color-mix(in srgb, var(--pu) 40%, #000),
+    0 6px 14px rgba(0, 0, 0, 0.4);
+}
+
+.network-connect .nc-pu:disabled {
+  cursor: default;
+  filter: grayscale(0.75) brightness(0.55);
+}
+
+.network-connect .nc-pu.is-armed {
+  animation: nc-armed 0.9s ease-in-out infinite;
+  box-shadow:
+    0 0 0 3px #fff,
+    0 0 26px var(--pu),
+    0 5px 0 color-mix(in srgb, var(--pu) 40%, #000);
+}
+
+@keyframes nc-armed {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.035);
+  }
+}
+
+.network-connect .nc-pu__icon {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  background: rgba(0, 0, 0, 0.22);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.15);
+}
+
+.network-connect .nc-pu__text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.network-connect .nc-pu__text b {
+  font-family: var(--font-display);
+  font-weight: 800;
+  font-size: 19px;
+  line-height: 1.05;
+  text-shadow: 0 2px 0 rgba(0, 0, 0, 0.35);
+}
+
+.network-connect .nc-pu__text small {
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.25;
+  color: rgba(255, 255, 255, 0.88);
+}
+
+.network-connect .nc-pu__badge {
+  position: absolute;
+  top: -9px;
+  right: -8px;
+  min-width: 28px;
+  height: 28px;
+  padding: 0 6px;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  background: linear-gradient(180deg, #5cff8f, #1fb857);
+  color: #053117;
+  font-family: var(--font-display);
+  font-weight: 800;
+  font-size: 15px;
+  border: 2px solid #0b1736;
+  box-shadow: 0 3px 8px rgba(0, 0, 0, 0.4);
+}
+
+.network-connect .nc-pu:disabled .nc-pu__badge {
+  background: #6b7280;
+  color: #111;
+}
+
+/* ---------- overlays ---------------------------------------------- */
+.network-connect .nc-howto {
+  margin: 0;
+}
+
+.network-connect .overlay__subtitle .nc-stars {
+  display: inline-flex;
+  margin: 2px auto 8px;
+}
+
+.network-connect .nc-win__note {
+  display: block;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--nc-dim);
+}
+
+.network-connect .overlay.nc-win {
+  background: rgba(4, 10, 28, 0.42);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+.network-connect .overlay.nc-win .overlay__eyebrow {
+  background: var(--nc-green);
+  color: #053117;
+}
+
+/* ---------- phone portrait / narrow screens ----------------------- */
+@media (max-width: 899px) {
+  .network-connect .nc-layout {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: 44px auto minmax(0, 1fr) auto;
+    grid-template-areas:
+      'head'
+      'status'
+      'board'
+      'power';
+    gap: 8px;
+    padding: max(8px, env(safe-area-inset-top)) 10px max(10px, env(safe-area-inset-bottom));
+  }
+
+  .network-connect .nc-header {
+    padding: 0 60px 0 54px;
+    gap: 8px;
+  }
+
+  .network-connect .nc-brand {
+    gap: 8px;
+  }
+
+  .network-connect .nc-brand__mark {
+    font-size: 34px;
+  }
+
+  .network-connect .nc-brand__c,
+  .network-connect .nc-brand__2 {
+    -webkit-text-stroke-width: 1.5px;
+    text-shadow: 0 2px 0 currentColor;
+  }
+
+  .network-connect .nc-brand__c {
+    text-shadow: 0 2px 0 #0b4a8a;
+  }
+
+  .network-connect .nc-brand__2 {
+    text-shadow: 0 2px 0 #8a5a00;
+  }
+
+  .network-connect .nc-brand__net {
+    display: none;
+  }
+
+  .network-connect .nc-brand__title {
+    font-size: 16px;
+    line-height: 0.95;
+    -webkit-text-stroke-width: 1px;
+    text-shadow: 0 2px 0 var(--nc-ink);
+  }
+
+  .network-connect .nc-brand__tag {
+    display: none;
+  }
+
+  .network-connect .nc-coins {
+    font-size: 18px;
+    padding: 3px 12px 3px 4px;
+    gap: 6px;
+  }
+
+  .network-connect .nc-coins__star {
+    width: 26px;
+    height: 26px;
+  }
+
+  .network-connect .nc-coins__star canvas {
+    width: 18px !important;
+    height: 18px !important;
+  }
+
+  .network-connect .nc-status {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 12px;
+    border-radius: 16px;
+  }
+
+  .network-connect .nc-level b {
+    font-size: 20px;
+  }
+
+  .network-connect .nc-level span {
+    font-size: 11px;
+  }
+
+  .network-connect .nc-moves {
+    grid-template-columns: auto auto auto;
+    grid-template-areas: 'label value stars';
+    justify-content: center;
+    column-gap: 8px;
+    padding: 4px 10px;
+  }
+
+  .network-connect .nc-moves__label {
+    font-size: 10px;
+  }
+
+  .network-connect .nc-moves__value {
+    font-size: 26px;
+  }
+
+  .network-connect .nc-stars {
+    margin: 0;
+    padding: 3px 8px;
+    gap: 2px;
+  }
+
+  .network-connect .nc-star {
+    width: 18px;
+    height: 18px;
+  }
+
+  .network-connect .nc-status__actions {
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .network-connect .nc-small-btn {
+    min-height: 26px;
+    padding: 0 10px;
+    font-size: 12px;
+  }
+
+  .network-connect .nc-info {
+    display: none;
+  }
+
+  .network-connect .nc-strip {
+    display: flex;
+    grid-column: 1 / -1;
+    justify-content: center;
+    padding-top: 6px;
+    border-top: 1px solid rgba(96, 150, 255, 0.18);
+  }
+
+  .network-connect .nc-power {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 8px;
+    padding: 0;
+    background: none;
+    border: 0;
+    box-shadow: none;
+  }
+
+  .network-connect .nc-power h2 {
+    display: none;
+  }
+
+  .network-connect .nc-pu {
+    grid-template-columns: minmax(0, 1fr);
+    justify-items: center;
+    gap: 4px;
+    min-height: 74px;
+    padding: 8px 4px 6px;
+    border-radius: 14px;
+    text-align: center;
+  }
+
+  .network-connect .nc-pu__icon {
+    width: 38px;
+    height: 38px;
+  }
+
+  .network-connect .nc-pu__icon canvas {
+    width: 28px !important;
+    height: 28px !important;
+  }
+
+  .network-connect .nc-pu__text b {
+    font-size: 11px;
+    line-height: 1.1;
+  }
+
+  .network-connect .nc-pu__text small {
+    display: none;
+  }
+
+  .network-connect .nc-pu__badge {
+    top: -7px;
+    right: -5px;
+    min-width: 22px;
+    height: 22px;
+    font-size: 12px;
+  }
+
+  .network-connect .nc-legend--row {
+    gap: 4px;
+  }
+
+  .network-connect .nc-legend--row li {
+    font-size: 9px;
+  }
+}
+
+/* ---------- phone landscape --------------------------------------- */
+@media (max-height: 540px) and (orientation: landscape) {
+  .network-connect .nc-layout {
+    grid-template-columns: minmax(0, 1fr) 296px;
+    grid-template-rows: auto minmax(0, 1fr);
+    grid-template-areas:
+      'board status'
+      'board power';
+    gap: 8px;
+    padding: 8px 10px 8px 58px;
+  }
+
+  .network-connect .nc-header,
+  .network-connect .nc-info {
+    display: none;
+  }
+
+  /* fixed second column: the spanning strip row must not widen the actions column */
+  .network-connect .nc-status {
+    grid-template-columns: minmax(0, 1fr) 62px;
+    grid-template-areas:
+      'level coins'
+      'moves actions'
+      'strip strip';
+    gap: 6px 8px;
+    padding: 8px 10px;
+  }
+
+  .network-connect .nc-level {
+    grid-area: level;
+  }
+
+  .network-connect .nc-level b {
+    font-size: 20px;
+  }
+
+  .network-connect .nc-level span {
+    font-size: 11px;
+  }
+
+  /* keep clear of the floating mute button in the top-right corner */
+  .network-connect .nc-coins--status {
+    grid-area: coins;
+    display: inline-flex;
+    justify-self: end;
+    align-self: center;
+    margin-right: 46px;
+    font-size: 17px;
+    padding: 3px 10px 3px 4px;
+    gap: 6px;
+  }
+
+  .network-connect .nc-coins--status .nc-coins__star {
+    width: 24px;
+    height: 24px;
+  }
+
+  .network-connect .nc-coins--status .nc-coins__star canvas {
+    width: 16px !important;
+    height: 16px !important;
+  }
+
+  .network-connect .nc-moves {
+    grid-area: moves;
+    grid-template-columns: auto auto auto;
+    grid-template-areas: 'label value stars';
+    justify-content: start;
+    column-gap: 8px;
+    padding: 4px 10px;
+  }
+
+  .network-connect .nc-moves__label {
+    font-size: 10px;
+  }
+
+  .network-connect .nc-moves__value {
+    font-size: 24px;
+  }
+
+  .network-connect .nc-stars {
+    margin: 0;
+    padding: 3px 8px;
+    gap: 2px;
+  }
+
+  .network-connect .nc-star {
+    width: 16px;
+    height: 16px;
+  }
+
+  .network-connect .nc-status__actions {
+    grid-area: actions;
+    flex-direction: column;
+    gap: 4px;
+    align-self: center;
+    min-width: 0;
+  }
+
+  .network-connect .nc-strip {
+    min-width: 0;
+  }
+
+  .network-connect .nc-small-btn {
+    min-height: 24px;
+    padding: 0 8px;
+    font-size: 11px;
+  }
+
+  .network-connect .nc-strip {
+    display: flex;
+    grid-area: strip;
+    justify-content: center;
+    gap: 10px;
+    padding-top: 6px;
+    border-top: 1px solid rgba(96, 150, 255, 0.18);
+  }
+
+  .network-connect .nc-strip li {
+    font-size: 14px;
+  }
+
+  .network-connect .nc-power {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    align-content: start;
+    padding: 0;
+    background: none;
+    border: 0;
+    box-shadow: none;
+  }
+
+  .network-connect .nc-power h2 {
+    display: none;
+  }
+
+  .network-connect .nc-pu {
+    grid-template-columns: 34px minmax(0, 1fr);
+    justify-items: start;
+    text-align: left;
+    min-height: 54px;
+    padding: 6px 8px;
+    gap: 8px;
+  }
+
+  .network-connect .nc-pu__icon {
+    width: 34px;
+    height: 34px;
+  }
+
+  .network-connect .nc-pu__icon canvas {
+    width: 26px !important;
+    height: 26px !important;
+  }
+
+  .network-connect .nc-pu__text b {
+    font-size: 13px;
+  }
+
+  .network-connect .nc-pu__text small {
+    display: none;
+  }
+}

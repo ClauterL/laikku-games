@@ -1,0 +1,973 @@
+/* Hansab – Access Crossing: game-specific styles (everything scoped under .game-root.access-crossing) */
+
+.game-root.access-crossing .game-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+/* ---------- HUD ---------------------------------------------------------------- */
+/* Top row + the two bottom corners only, so nothing ever covers the lanes around the runner. */
+
+.game-root.access-crossing .ac-hud-top {
+  padding-left: 48px; /* room for the floating home button */
+  align-items: flex-start;
+}
+
+.game-root.access-crossing .ac-hud-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.game-root.access-crossing .ac-hud-top > .ac-hud-group {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+/* Phones: hearts in the top row, FLOOR chip + mute hang right below them (like the mock-up).
+   The second row is taken out of the flow so it can never push the top row off the screen. */
+.game-root.access-crossing .ac-hud-right {
+  position: relative;
+  display: flex;
+  flex: none;
+}
+
+.game-root.access-crossing .ac-hud-right .ac-hud-group {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+}
+
+.game-root.access-crossing .ac-chip {
+  min-height: 40px;
+  padding: 2px 12px;
+  gap: 6px;
+  background: rgba(13, 26, 60, 0.9);
+  border: 1.5px solid rgba(255, 255, 255, 0.22);
+}
+
+.game-root.access-crossing .ac-chip .chip__value {
+  font-size: 22px;
+  font-variant-numeric: tabular-nums;
+}
+
+.game-root.access-crossing .ac-ico {
+  width: 21px;
+  height: 21px;
+  flex: none;
+}
+
+.game-root.access-crossing .ac-hearts {
+  gap: 2px;
+  padding: 2px 10px;
+}
+
+.game-root.access-crossing .ac-heart {
+  width: 23px;
+  height: 23px;
+  fill: #ff4d5e;
+  filter: drop-shadow(0 2px 0 rgba(0, 0, 0, 0.35));
+  transition: transform 0.2s ease, fill 0.2s ease;
+}
+
+.game-root.access-crossing .ac-heart--empty {
+  fill: rgba(255, 255, 255, 0.2);
+  filter: none;
+  transform: scale(0.85);
+}
+
+.game-root.access-crossing .ac-shield {
+  width: 24px;
+  height: 24px;
+  margin-left: 4px;
+  filter: drop-shadow(0 0 6px rgba(47, 128, 255, 0.9));
+  animation: ac-badge-in 0.4s cubic-bezier(0.2, 1.4, 0.4, 1);
+}
+
+.game-root.access-crossing .ac-tool {
+  width: 40px;
+  min-height: 40px;
+  background: rgba(13, 26, 60, 0.9);
+  border: 1.5px solid rgba(255, 255, 255, 0.22);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.3);
+}
+
+.game-root.access-crossing .ac-floor .chip__value {
+  font-size: 16px;
+  letter-spacing: 0.06em;
+}
+
+.game-root.access-crossing .ac-hud-bottom {
+  position: absolute;
+  left: max(10px, env(safe-area-inset-left));
+  right: max(10px, env(safe-area-inset-right));
+  bottom: max(10px, env(safe-area-inset-bottom));
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 10px;
+  pointer-events: none;
+}
+
+.game-root.access-crossing .ac-hud-inventory {
+  align-items: flex-end;
+}
+
+.game-root.access-crossing .ac-power {
+  flex: none;
+  border-color: #ffd43b;
+  animation: ac-badge-in 0.4s cubic-bezier(0.2, 1.4, 0.4, 1);
+}
+
+.game-root.access-crossing .ac-badges {
+  display: flex;
+  gap: 5px;
+}
+
+.game-root.access-crossing .ac-badge {
+  position: relative;
+  width: 48px;
+  height: 60px;
+  padding-top: 8px;
+  border-radius: 8px;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--c) 82%, #fff) 0%, var(--c) 45%, color-mix(in srgb, var(--c) 78%, #000) 100%);
+  border: 1.5px solid rgba(255, 255, 255, 0.55);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.35);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: space-between;
+  animation: ac-badge-in 0.4s cubic-bezier(0.2, 1.4, 0.4, 1);
+}
+
+.game-root.access-crossing .ac-badge::before {
+  content: '';
+  position: absolute;
+  top: -5px;
+  left: 50%;
+  width: 12px;
+  height: 8px;
+  margin-left: -6px;
+  border-radius: 2px;
+  background: #c9d0db;
+  border: 1px solid rgba(16, 26, 54, 0.6);
+}
+
+.game-root.access-crossing .ac-badge svg {
+  width: 22px;
+  height: 22px;
+  margin-top: 2px;
+}
+
+.game-root.access-crossing .ac-badge span {
+  width: calc(100% - 6px);
+  margin-bottom: 3px;
+  padding: 2px 0;
+  border-radius: 4px;
+  background: #fff;
+  color: color-mix(in srgb, var(--c) 80%, #000);
+  font-size: 6px;
+  font-weight: 900;
+  letter-spacing: -0.01em;
+  text-transform: uppercase;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+@keyframes ac-badge-in {
+  from {
+    transform: scale(0.3) rotate(-10deg);
+    opacity: 0;
+  }
+  to {
+    transform: none;
+    opacity: 1;
+  }
+}
+
+.game-root.access-crossing .ac-note {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 6px 12px 7px;
+  border-radius: 3px;
+  background: #ffe14d;
+  color: #2b3240;
+  transform: rotate(-4deg);
+  box-shadow: 0 6px 14px rgba(0, 0, 0, 0.35);
+  line-height: 1;
+  animation: ac-badge-in 0.4s cubic-bezier(0.2, 1.4, 0.4, 1);
+}
+
+.game-root.access-crossing .ac-note span {
+  font-size: 9px;
+  font-weight: 900;
+  letter-spacing: 0.14em;
+  opacity: 0.7;
+}
+
+.game-root.access-crossing .ac-note b {
+  font-family: var(--font-display);
+  font-size: 22px;
+  letter-spacing: 0.08em;
+}
+
+.game-root.access-crossing .ac-note--big {
+  transform: rotate(-2deg);
+  margin: 6px auto 12px;
+  padding: 8px 20px 10px;
+}
+
+.game-root.access-crossing .ac-note--big b {
+  font-size: 30px;
+}
+
+/* ---------- swipe hint (first run) ------------------------------------------------- */
+
+.game-root.access-crossing .ac-hint {
+  position: absolute;
+  left: 50%;
+  bottom: max(22px, env(safe-area-inset-bottom));
+  transform: translateX(-50%);
+  padding: 8px 16px;
+  border-radius: 999px;
+  background: rgba(13, 26, 60, 0.88);
+  border: 1.5px solid rgba(255, 255, 255, 0.3);
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.35);
+  color: #dbe7ff;
+  font-size: 14px;
+  font-weight: 800;
+  white-space: nowrap;
+  pointer-events: none;
+  animation: ac-hint-pulse 1.6s ease-in-out infinite;
+}
+
+.game-root.access-crossing .ac-hint b {
+  color: #ffd43b;
+  font-family: var(--font-display);
+  font-size: 17px;
+  letter-spacing: 0.04em;
+}
+
+.game-root.access-crossing .ac-hint i {
+  font-style: normal;
+  opacity: 0.5;
+  margin: 0 3px;
+}
+
+@keyframes ac-hint-pulse {
+  0%,
+  100% {
+    transform: translateX(-50%) scale(1);
+  }
+  50% {
+    transform: translateX(-50%) scale(1.05);
+  }
+}
+
+/* ---------- toast ---------------------------------------------------------------- */
+
+.game-root.access-crossing .ac-toast {
+  position: absolute;
+  left: 50%;
+  top: 108px;
+  transform: translateX(-50%);
+  max-width: calc(100% - 24px);
+  padding: 8px 16px;
+  border-radius: 14px;
+  background: rgba(12, 22, 52, 0.94);
+  border: 2px solid rgba(255, 255, 255, 0.25);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
+  color: #fff;
+  font-size: 14px;
+  font-weight: 800;
+  text-align: center;
+  line-height: 1.3;
+  pointer-events: none;
+  animation: ac-toast-in 0.25s cubic-bezier(0.2, 1.4, 0.4, 1);
+}
+
+.game-root.access-crossing .ac-toast--deny {
+  border-color: #e63946;
+  color: #ffb3b8;
+}
+
+.game-root.access-crossing .ac-toast--ok {
+  border-color: #2bb673;
+  color: #9dffc9;
+}
+
+.game-root.access-crossing .ac-toast--info {
+  border-color: #2f80ff;
+  color: #cfe3ff;
+}
+
+.game-root.access-crossing .ac-toast--coin {
+  border-color: #ffd43b;
+  color: #ffe68a;
+}
+
+@keyframes ac-toast-in {
+  from {
+    transform: translateX(-50%) translateY(-12px) scale(0.9);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(-50%);
+    opacity: 1;
+  }
+}
+
+/* ---------- HUD juice ---------------------------------------------------------------- */
+
+@keyframes ac-bump {
+  0% {
+    transform: scale(1.5);
+    color: #ffe68a;
+  }
+  100% {
+    transform: none;
+  }
+}
+
+.game-root.access-crossing .ac-bump {
+  display: inline-block;
+  animation: ac-bump 0.28s cubic-bezier(0.2, 1.4, 0.4, 1);
+}
+
+.game-root.access-crossing .ac-hearts--hit {
+  animation: ac-shake 0.4s ease;
+}
+
+/* ---------- start / game-over cards ------------------------------------------------ */
+
+/* The start card sits on the live corridor (runner jogging through the gates) – no blur, just a
+   gentle darkening toward the bottom so the card and the scene both read. */
+.game-root.access-crossing .ac-start {
+  background: linear-gradient(180deg, rgba(4, 10, 28, 0.08) 0%, rgba(4, 10, 28, 0.42) 100%);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+.game-root.access-crossing .ac-start .overlay__card {
+  width: min(470px, 100%);
+  background: rgba(9, 18, 46, 0.9);
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
+.game-root.access-crossing .ac-howto {
+  margin: 0;
+}
+
+/* badge-colour legend under the how-to */
+.game-root.access-crossing .ac-legend {
+  display: flex;
+  justify-content: center;
+  gap: 10px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px dashed var(--panel-border);
+}
+
+.game-root.access-crossing .ac-legend__item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+  min-width: 52px;
+}
+
+.game-root.access-crossing .ac-legend__item small {
+  color: color-mix(in srgb, var(--c) 70%, #fff);
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  text-align: center;
+  line-height: 1.1;
+}
+
+.game-root.access-crossing .ac-badge--mini {
+  width: 38px;
+  height: 46px;
+  padding-top: 6px;
+  justify-content: center;
+  animation: none;
+}
+
+.game-root.access-crossing .ac-badge--mini svg {
+  width: 20px;
+  height: 20px;
+  margin: 0;
+}
+
+/* Start card like the mock-up: big text wordmark, spaced-out title, cyan tagline, green PLAY. */
+.game-root.access-crossing .ac-start .overlay__eyebrow {
+  display: block;
+  margin: 0;
+  padding: 0;
+  background: none;
+  font-family: var(--font-display);
+  font-size: clamp(46px, 11vw, 64px);
+  font-weight: 800;
+  line-height: 0.95;
+  letter-spacing: -0.02em;
+  text-transform: none;
+  text-shadow: 0 4px 0 rgba(0, 0, 0, 0.25);
+}
+
+.game-root.access-crossing .ac-start .overlay__title {
+  margin-top: 8px;
+  font-family: var(--font-ui);
+  font-size: clamp(16px, 4.4vw, 22px);
+  font-weight: 900;
+  letter-spacing: 0.34em;
+  text-transform: uppercase;
+  text-shadow: none;
+}
+
+.game-root.access-crossing .ac-start .overlay__subtitle {
+  color: #6fd8ff;
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.game-root.access-crossing .ac-start .btn--primary {
+  min-width: 220px;
+  min-height: 62px;
+  font-size: 28px;
+  border-radius: 18px;
+  background: linear-gradient(180deg, #46e08b 0%, #22a862 100%);
+  box-shadow: 0 7px 0 #14713f, 0 12px 30px rgba(0, 0, 0, 0.4), inset 0 2px 0 rgba(255, 255, 255, 0.35);
+}
+
+.game-root.access-crossing .ac-start .btn--primary:active {
+  box-shadow: 0 2px 0 #14713f;
+}
+
+.game-root.access-crossing .ac-over .overlay__stats {
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.game-root.access-crossing .ac-over .overlay__stat {
+  flex: 1 1 84px;
+  min-width: 84px;
+}
+
+/* ---------- popups ------------------------------------------------------------- */
+
+.game-root.access-crossing .ac-popup {
+  position: absolute;
+  inset: 0;
+  z-index: 25;
+  display: grid;
+  place-items: center;
+  padding: 14px;
+  background: rgba(4, 10, 28, 0.55);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  animation: overlay-in 0.2s ease-out;
+}
+
+.game-root.access-crossing .ac-popup__card {
+  width: min(380px, 100%);
+  max-height: calc(100% - 16px);
+  overflow: auto;
+  padding: 18px 18px 16px;
+  border-radius: 22px;
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  box-shadow: var(--shadow), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  text-align: center;
+  animation: card-in 0.3s cubic-bezier(0.2, 1.4, 0.4, 1);
+}
+
+.game-root.access-crossing .ac-popup__eyebrow {
+  display: inline-block;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: var(--accent);
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.game-root.access-crossing .ac-popup__title {
+  margin: 8px 0 4px;
+  font-family: var(--font-display);
+  font-size: 26px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  text-shadow: 0 3px 0 rgba(0, 0, 0, 0.25);
+}
+
+.game-root.access-crossing .ac-popup__hint {
+  margin: 8px 0 0;
+  color: var(--text-dim);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.game-root.access-crossing .ac-popup__hint em {
+  color: var(--accent-2);
+  font-style: normal;
+  font-weight: 900;
+}
+
+.game-root.access-crossing .ac-popup__tries {
+  margin-top: 8px;
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+
+/* keypad */
+.game-root.access-crossing .ac-pin-digits {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.game-root.access-crossing .ac-pin-digit {
+  width: 46px;
+  height: 54px;
+  display: grid;
+  place-items: center;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 2px solid var(--panel-border);
+  font-family: var(--font-display);
+  font-size: 30px;
+  font-weight: 800;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.game-root.access-crossing .ac-pin-digit--filled {
+  border-color: var(--accent-2);
+  background: rgba(43, 182, 115, 0.18);
+}
+
+.game-root.access-crossing .ac-shake {
+  animation: ac-shake 0.4s ease;
+}
+
+@keyframes ac-shake {
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+  20% {
+    transform: translateX(-9px);
+  }
+  40% {
+    transform: translateX(8px);
+  }
+  60% {
+    transform: translateX(-6px);
+  }
+  80% {
+    transform: translateX(4px);
+  }
+}
+
+.game-root.access-crossing .ac-keypad {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.game-root.access-crossing .ac-key {
+  appearance: none;
+  min-height: 50px;
+  border: 0;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--text);
+  font-family: var(--font-display);
+  font-size: 24px;
+  font-weight: 800;
+  cursor: pointer;
+  box-shadow: 0 4px 0 rgba(0, 0, 0, 0.3);
+  transition: transform 0.08s ease, filter 0.15s ease;
+}
+
+.game-root.access-crossing .ac-key:hover {
+  filter: brightness(1.15);
+}
+
+.game-root.access-crossing .ac-key:active {
+  transform: translateY(3px);
+  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.3);
+}
+
+.game-root.access-crossing .ac-key--ok {
+  background: linear-gradient(180deg, #2bb673, #1e8a55);
+  color: #fff;
+}
+
+.game-root.access-crossing .ac-key--del {
+  font-size: 20px;
+}
+
+/* visitor */
+.game-root.access-crossing .ac-visitor {
+  display: grid;
+  grid-template-columns: 92px 1fr;
+  gap: 12px;
+  margin-top: 10px;
+  padding: 12px;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.06);
+  text-align: left;
+}
+
+.game-root.access-crossing .ac-face {
+  width: 92px;
+  height: 92px;
+  border-radius: 14px;
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.35);
+}
+
+.game-root.access-crossing .ac-visitor__rows {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 5px;
+  min-width: 0;
+}
+
+.game-root.access-crossing .ac-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text-dim);
+}
+
+.game-root.access-crossing .ac-row b {
+  color: var(--text);
+  font-weight: 800;
+  text-align: right;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.game-root.access-crossing .ac-pill {
+  padding: 2px 9px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.1em;
+}
+
+.game-root.access-crossing .ac-pill--yes {
+  background: rgba(43, 182, 115, 0.25);
+  color: #8dffc0;
+}
+
+.game-root.access-crossing .ac-pill--no {
+  background: rgba(230, 57, 70, 0.25);
+  color: #ffa0a7;
+}
+
+.game-root.access-crossing .ac-decide {
+  display: flex;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.game-root.access-crossing .ac-decide .btn {
+  flex: 1;
+  padding: 0 10px;
+  min-height: 52px;
+  font-size: 20px;
+}
+
+.game-root.access-crossing .ac-btn--yes {
+  background: linear-gradient(180deg, #2bb673 0%, #1e8a55 100%);
+  box-shadow: 0 6px 0 #146140, 0 10px 30px rgba(0, 0, 0, 0.35);
+}
+
+.game-root.access-crossing .ac-btn--no {
+  background: linear-gradient(180deg, #e63946 0%, #b12a35 100%);
+  box-shadow: 0 6px 0 #7d1d25, 0 10px 30px rgba(0, 0, 0, 0.35);
+}
+
+/* ---------- responsive -------------------------------------------------------- */
+
+/* Wide screens: hearts, floor and mute share one row, so the toast can sit right under it. */
+@media (min-width: 700px) {
+  .game-root.access-crossing .ac-hud-right {
+    flex-direction: row-reverse;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .game-root.access-crossing .ac-hud-right .ac-hud-group {
+    position: static;
+  }
+
+  .game-root.access-crossing .ac-toast {
+    top: 62px;
+    font-size: 15px;
+  }
+}
+
+@media (max-width: 480px) {
+  .game-root.access-crossing .ac-hud-top {
+    gap: 5px;
+  }
+
+  .game-root.access-crossing .ac-hud-group {
+    gap: 4px;
+  }
+
+  .game-root.access-crossing .ac-chip {
+    min-height: 36px;
+    padding: 2px 8px;
+    gap: 4px;
+  }
+
+  .game-root.access-crossing .ac-hearts {
+    padding: 2px 8px;
+  }
+
+  .game-root.access-crossing .ac-chip .chip__value {
+    font-size: 18px;
+  }
+
+  .game-root.access-crossing .ac-ico {
+    width: 18px;
+    height: 18px;
+  }
+
+  .game-root.access-crossing .ac-heart {
+    width: 20px;
+    height: 20px;
+  }
+
+  .game-root.access-crossing .ac-shield {
+    width: 21px;
+    height: 21px;
+  }
+
+  .game-root.access-crossing .ac-floor .chip__value {
+    font-size: 14px;
+  }
+
+  .game-root.access-crossing .ac-tool {
+    width: 36px;
+    min-height: 36px;
+  }
+
+  .game-root.access-crossing .ac-toast {
+    top: 100px;
+    font-size: 13px;
+  }
+
+  .game-root.access-crossing .ac-badge {
+    width: 44px;
+    height: 54px;
+  }
+
+  .game-root.access-crossing .ac-badge svg {
+    width: 18px;
+    height: 18px;
+  }
+
+  .game-root.access-crossing .ac-badge span {
+    font-size: 5.5px;
+  }
+
+  .game-root.access-crossing .ac-hint {
+    font-size: 13px;
+    padding: 7px 13px;
+  }
+
+  .game-root.access-crossing .ac-legend {
+    gap: 6px;
+  }
+
+  .game-root.access-crossing .ac-legend__item {
+    min-width: 0;
+    flex: 1 1 0;
+  }
+
+  .game-root.access-crossing .ac-legend__item small {
+    font-size: 8.5px;
+    letter-spacing: 0.02em;
+  }
+}
+
+@media (max-height: 500px) {
+  .game-root.access-crossing .ac-badge {
+    width: 38px;
+    height: 46px;
+    padding-top: 6px;
+  }
+
+  .game-root.access-crossing .ac-badge svg {
+    width: 16px;
+    height: 16px;
+  }
+
+  .game-root.access-crossing .ac-badge span {
+    font-size: 5px;
+  }
+
+  .game-root.access-crossing .ac-toast {
+    top: 58px;
+    font-size: 13px;
+    padding: 6px 14px;
+  }
+
+  .game-root.access-crossing .ac-hint {
+    bottom: max(8px, env(safe-area-inset-bottom));
+  }
+
+  /* start / game-over cards must fit a 390 px tall phone */
+  .game-root.access-crossing .overlay__card {
+    padding: 14px 22px 14px;
+  }
+
+  /* no room for the badge legend on a landscape phone */
+  .game-root.access-crossing .ac-legend {
+    display: none;
+  }
+
+  .game-root.access-crossing .ac-start .overlay__eyebrow {
+    font-size: 40px;
+  }
+
+  .game-root.access-crossing .ac-start .overlay__title {
+    margin-top: 4px;
+    font-size: 15px;
+  }
+
+  .game-root.access-crossing .overlay__subtitle {
+    margin-top: 6px;
+  }
+
+  .game-root.access-crossing .overlay__howto {
+    margin-top: 8px;
+    padding: 7px 12px;
+    font-size: 12.5px;
+    line-height: 1.4;
+  }
+
+  .game-root.access-crossing .overlay__stats {
+    margin-top: 8px;
+  }
+
+  .game-root.access-crossing .overlay__stat {
+    padding: 6px 10px;
+  }
+
+  .game-root.access-crossing .overlay__stat b {
+    font-size: 22px;
+  }
+
+  .game-root.access-crossing .overlay__actions {
+    margin-top: 10px;
+  }
+
+  .game-root.access-crossing .ac-start .btn--primary {
+    min-height: 50px;
+    font-size: 24px;
+  }
+
+  .game-root.access-crossing .ac-over .overlay__title {
+    font-size: 30px;
+  }
+
+  .game-root.access-crossing .ac-popup__card {
+    padding: 10px 14px 10px;
+  }
+
+  .game-root.access-crossing .ac-popup__title {
+    margin: 4px 0 2px;
+    font-size: 20px;
+  }
+
+  /* keypad card: two columns – note + digits left, keys right */
+  .game-root.access-crossing .ac-popup__card--pin {
+    width: min(460px, 100%);
+    display: grid;
+    grid-template-columns: 1fr 190px;
+    grid-template-rows: auto auto auto auto 1fr;
+    column-gap: 14px;
+    align-items: center;
+  }
+
+  .game-root.access-crossing .ac-popup__card--pin > * {
+    grid-column: 1;
+  }
+
+  .game-root.access-crossing .ac-popup__card--pin .ac-popup__eyebrow {
+    justify-self: center;
+  }
+
+  .game-root.access-crossing .ac-popup__card--pin .ac-keypad {
+    grid-column: 2;
+    grid-row: 1 / span 5;
+    margin: 0;
+    gap: 5px;
+  }
+
+  .game-root.access-crossing .ac-key {
+    min-height: 44px;
+    font-size: 20px;
+  }
+
+  .game-root.access-crossing .ac-pin-digit {
+    width: 38px;
+    height: 40px;
+    font-size: 22px;
+  }
+
+  .game-root.access-crossing .ac-note--big {
+    margin: 4px auto 6px;
+    padding: 4px 14px 6px;
+  }
+
+  .game-root.access-crossing .ac-note--big b {
+    font-size: 22px;
+  }
+
+  .game-root.access-crossing .ac-visitor {
+    grid-template-columns: 72px 1fr;
+    padding: 8px;
+    margin-top: 6px;
+  }
+
+  .game-root.access-crossing .ac-face {
+    width: 72px;
+    height: 72px;
+  }
+
+  .game-root.access-crossing .ac-row {
+    font-size: 12px;
+  }
+
+  .game-root.access-crossing .ac-decide .btn {
+    min-height: 42px;
+    font-size: 17px;
+  }
+
+  .game-root.access-crossing .ac-decide {
+    margin-top: 8px;
+  }
+}
