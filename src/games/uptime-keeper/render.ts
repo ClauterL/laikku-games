@@ -14,7 +14,7 @@
  */
 import { drawFloatTexts, drawParticles, hexToRgba, roundRectPath, type FloatText, type Particle } from '../../shared/draw'
 import { clamp } from '../../shared/math'
-import { ALERT_COLOR, ALERT_GLYPH, COLORS, PIPE_COLOR, drawCube, drawGlyph } from './glyphs'
+import { ALERT_COLOR, ALERT_GLYPH, COLORS, PIPE_COLOR, drawCube, drawGlyph, type GlyphName } from './glyphs'
 import { STUB_X, TRAY_OFFSET, TRAY_Y, cellAt, pipeKindOf } from './levels'
 import { CRIT_TEMP, WARN_TEMP, alertSeverity, powerRatio } from './sim'
 import {
@@ -22,12 +22,14 @@ import {
   type ActionKind,
   type Alert,
   type AlertType,
+  type Customer,
   type Dir,
   type HallLayout,
   type PipeKind,
   type Pt,
   type Rack,
   type Station,
+  type Virus,
   type World,
 } from './types'
 
@@ -87,11 +89,23 @@ export function stationBox(s: { cx: number; cy: number; w: number; h: number }):
   }
 }
 
+/** A visitor is as tall as the technician (feet at x, y). */
+export function customerBox(c: { x: number; y: number }): SpriteBox {
+  return { x: c.x - 0.34, y: c.y - 0.92, w: 0.68, h: 1.0, ax: c.x, ay: c.y - 0.92, fx: c.x, fy: c.y - 0.45, base: c.y }
+}
+
+export function virusBox(v: { x: number; y: number }): SpriteBox {
+  return { x: v.x - 0.4, y: v.y - 0.62, w: 0.8, h: 0.74, ax: v.x, ay: v.y - 0.62, fx: v.x, fy: v.y - 0.28, base: v.y }
+}
+
 export function boxOf(w: World, id: string): SpriteBox | null {
   const r = w.rackById.get(id)
   if (r) return rackBox(r)
   const s = w.stationById.get(id)
-  return s ? stationBox(s) : null
+  if (s) return stationBox(s)
+  for (const c of w.customers) if (c.id === id) return customerBox(c)
+  for (const v of w.viruses) if (v.id === id) return virusBox(v)
+  return null
 }
 
 /* ------------------------------------------------------------------ */
@@ -468,7 +482,69 @@ export function buildStatic(hall: HallLayout, pipes: PipeCache, T: number, dpr: 
   paintDecals(g, hall, T)
   paintZoneLabels(g, hall, T)
   paintWalls(g, hall, T)
+  paintDoor(g, hall, T)
   return { canvas: c, margin }
+}
+
+/**
+ * The visitor entrance: a gap in the left wall with a sliding-door track, door posts with a
+ * pink visitor light, and a short walk with a welcome mat outside (in the static layer's margin).
+ */
+function paintDoor(g: Ctx, hall: HallLayout, T: number) {
+  const d = hall.door
+  if (!d) return
+  const y = d.y * T
+  const out = T * 1.02
+  g.save()
+  // the floor runs through the opening and out onto the entrance walk
+  g.fillStyle = '#1e232c'
+  g.fillRect(-out, y, out + T, T)
+  g.fillStyle = 'rgba(255,255,255,0.045)'
+  g.fillRect(-out, y, out + T, 1)
+  g.fillRect(-out, y + T - 1, out + T, 1)
+  g.fillRect(0, y, 1, T)
+  // sliding-door track along the wall line
+  g.fillStyle = '#0a0c10'
+  g.fillRect(T * 0.4, y, T * 0.2, T)
+  g.fillStyle = 'rgba(30,200,255,0.28)'
+  g.fillRect(T * 0.4, y, 1, T)
+  g.fillRect(T * 0.6 - 1, y, 1, T)
+  // welcome mat with the visitor sign, hazard stripes at the outer end of the walk
+  roundRectPath(g, -out + T * 0.22, y + T * 0.14, out - T * 0.34, T * 0.72, T * 0.08)
+  g.fillStyle = '#2a1830'
+  g.fill()
+  g.strokeStyle = hexToRgba(COLORS.customer, 0.5)
+  g.lineWidth = 1
+  g.stroke()
+  drawGlyph(g, 'person', -out / 2 + T * 0.06, y + T * 0.5, T * 0.4, hexToRgba(COLORS.customer, 0.85), false)
+  g.save()
+  g.beginPath()
+  g.rect(-out, y, T * 0.16, T)
+  g.clip()
+  g.fillStyle = '#e0aa12'
+  g.fillRect(-out, y, T * 0.16, T)
+  g.fillStyle = '#14161b'
+  for (let o = -T * 0.2; o < T * 1.2; o += T * 0.22) {
+    g.beginPath()
+    g.moveTo(-out, y + o)
+    g.lineTo(-out + T * 0.16, y + o - T * 0.16)
+    g.lineTo(-out + T * 0.16, y + o - T * 0.05)
+    g.lineTo(-out, y + o + T * 0.11)
+    g.closePath()
+    g.fill()
+  }
+  g.restore()
+  // door posts with a pink visitor light strip
+  for (const py of [y - T * 0.14, y + T]) {
+    g.fillStyle = '#3a4250'
+    g.fillRect(-2, py, T + 4, T * 0.14)
+    g.shadowColor = COLORS.customer
+    g.shadowBlur = T * 0.25
+    g.fillStyle = '#ff8fd6'
+    g.fillRect(T * 0.16, py + T * 0.045, T * 0.68, T * 0.05)
+    g.shadowBlur = 0
+  }
+  g.restore()
 }
 
 /* ------------------------------------------------------------------ */
@@ -487,7 +563,8 @@ export interface PlayerView {
 }
 
 export interface Fx {
-  kind: 'mist' | 'chev' | 'smoke' | 'ring'
+  /** arc – a crackling line from (x, y) to (x2, y2); pixel – a square glitch particle. */
+  kind: 'mist' | 'chev' | 'smoke' | 'ring' | 'arc' | 'pixel'
   x: number
   y: number
   vx: number
@@ -496,6 +573,8 @@ export interface Fx {
   max: number
   size: number
   color: string
+  x2?: number
+  y2?: number
 }
 
 export interface StickView {
@@ -536,6 +615,10 @@ export interface Scene {
   scrolling: boolean
   stick: StickView | null
   live: boolean
+  /** The technician's speech bubble ("We're on it!"), `t` = seconds shown so far. */
+  techSay: { text: string; t: number } | null
+  /** Draws the banner drone in screen space (under the alert badges). */
+  drone: ((ctx: Ctx) => void) | null
 }
 
 /** Highest-priority non-upgrade alert on a target (alerts are kept sorted). */
@@ -664,19 +747,37 @@ function drawPad(ctx: Ctx, s: Scene) {
 
 function drawFloorFx(ctx: Ctx, s: Scene) {
   const { T, world: w, time: t } = s
-  // light spilled on the floor by racks in trouble
+  // light spilled on the floor by racks in trouble (purple for malware)
   for (const r of w.racks) {
     const hot = r.temp >= WARN_TEMP - 6 && !r.down
-    if (!hot && !r.down) continue
-    const k = r.down ? 0.5 + 0.2 * Math.sin(t * 3) : clamp((r.temp - (WARN_TEMP - 6)) / 20, 0.25, 1) * (0.75 + 0.25 * Math.sin(t * 8))
+    if (!hot && !r.down && !r.infected) continue
+    const k = r.infected ? 0.75 + 0.25 * Math.sin(t * 5) : r.down ? 0.5 + 0.2 * Math.sin(t * 3) : clamp((r.temp - (WARN_TEMP - 6)) / 20, 0.25, 1) * (0.75 + 0.25 * Math.sin(t * 8))
+    const rgb = r.infected ? '176,77,255' : '255,45,58'
     const cx = (r.cx + 0.5) * T
     const cy = (r.cy + 1.12) * T
     const rad = T * 0.95
     const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, rad)
-    g.addColorStop(0, `rgba(255,45,58,${(0.34 * k).toFixed(3)})`)
-    g.addColorStop(1, 'rgba(255,45,58,0)')
+    g.addColorStop(0, `rgba(${rgb},${(0.34 * k).toFixed(3)})`)
+    g.addColorStop(1, `rgba(${rgb},0)`)
     ctx.fillStyle = g
     ctx.fillRect(cx - rad, cy - rad * 0.3, rad * 2, rad * 1.1)
+  }
+  // a waiting customer's patience ring on the floor around their feet
+  for (const c of w.customers) {
+    if (c.state === 'leave' || !s.live) continue
+    const k = clamp(c.patience / c.patienceMax, 0, 1)
+    const color = k < 0.34 ? COLORS.alert : k < 0.6 ? COLORS.warn : COLORS.ok
+    const rx = T * 0.36
+    const ry = T * 0.15
+    ctx.lineWidth = Math.max(2, T * 0.05)
+    ctx.strokeStyle = 'rgba(0,0,0,0.45)'
+    ctx.beginPath()
+    ctx.ellipse(c.x * T, (c.y + 0.02) * T, rx, ry, 0, 0, Math.PI * 2)
+    ctx.stroke()
+    ctx.strokeStyle = color
+    ctx.beginPath()
+    ctx.ellipse(c.x * T, (c.y + 0.02) * T, rx, ry, 0, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * k)
+    ctx.stroke()
   }
   // route preview for tap-to-move
   if (s.path.length) {
@@ -723,8 +824,10 @@ function drawFloorFx(ctx: Ctx, s: Scene) {
 /* ---------- cabinets ---------- */
 
 function rackTone(w: World, r: Rack, alert: Alert | undefined): { color: string; level: number } {
+  if (r.infected) return { color: COLORS.virus, level: 2 }
   if (r.down) return { color: COLORS.off, level: 3 }
-  if (r.temp >= CRIT_TEMP || (alert && alert.type !== 'upgrade' && alertSeverity(w, alert) === 'critical')) return { color: COLORS.alert, level: 2 }
+  if (r.temp >= CRIT_TEMP || (alert && alert.type !== 'upgrade' && alert.type !== 'customer' && alertSeverity(w, alert) === 'critical')) return { color: COLORS.alert, level: 2 }
+  if (r.perf) return { color: COLORS.customer, level: 1 }
   if (r.temp >= 68 || !r.fanOk || !r.psuOk || r.onBattery || !r.linkOk) return { color: COLORS.warn, level: 1 }
   return { color: COLORS.ok, level: 0 }
 }
@@ -811,17 +914,28 @@ function drawRack(ctx: Ctx, s: Scene, r: Rack) {
   const uh = (ih - gap * (units + 1)) / units
   const ls = Math.max(1.5, T * 0.05)
   const degraded = !r.linkOk
+  const sick = r.infected
+  const slow = r.perf && !dark
   for (let i = 0; i < units; i++) {
     const uy = iy + gap + i * (uh + gap)
-    ctx.fillStyle = dark ? '#0d1014' : '#181d26'
+    ctx.fillStyle = dark ? '#0d1014' : sick ? '#1d1028' : '#181d26'
     ctx.fillRect(ix + gap, uy, iw - 2 * gap, uh)
-    if (dark) continue
+    if (dark && !sick) continue
     const ly = uy + (uh - ls) / 2
     for (let j = 0; j < 3; j++) {
       const seed = r.ledSeed + i * 17 + j * 5
       let color: string
       let on: boolean
-      if (degraded) {
+      if (sick) {
+        // malware: frantic purple / acid-green flicker
+        const c = hash(seed + Math.floor(t * 14) * 3.1)
+        color = c < 0.55 ? COLORS.virus : c < 0.8 ? COLORS.toxic : '#ff5ec8'
+        on = c > 0.18
+      } else if (slow) {
+        // a crawling server: every LED pulses slowly in the customer's colour
+        color = COLORS.customer
+        on = Math.floor(t * 1.4 + i * 0.25) % 2 === 0
+      } else if (degraded) {
         color = COLORS.warn
         on = Math.floor(t * 2.5) % 2 === 0
       } else if (r.onBattery) {
@@ -836,10 +950,10 @@ function drawRack(ctx: Ctx, s: Scene, r: Rack) {
       ctx.fillStyle = color
       ctx.fillRect(ix + gap * 2 + j * (ls + gap), ly, ls, ls)
     }
-    // activity bar
-    const act = hash(r.ledSeed + i * 3 + Math.floor(t * 3) * 7.1)
-    ctx.fillStyle = 'rgba(30,200,255,0.32)'
-    ctx.fillRect(ix + iw * 0.56, ly, iw * 0.34 * act, ls)
+    // activity bar (short and sluggish on a slow server, glitching on an infected one)
+    const act = hash(r.ledSeed + i * 3 + Math.floor(t * (slow ? 0.8 : sick ? 9 : 3)) * 7.1)
+    ctx.fillStyle = sick ? 'rgba(176,77,255,0.55)' : slow ? 'rgba(255,110,199,0.35)' : 'rgba(30,200,255,0.32)'
+    ctx.fillRect(ix + iw * 0.56, ly, iw * 0.34 * act * (slow ? 0.35 : 1), ls)
   }
   if (dark) {
     // one red standby LED so the cabinet does not look deleted
@@ -859,16 +973,37 @@ function drawRack(ctx: Ctx, s: Scene, r: Rack) {
     ctx.fillStyle = `rgba(30,200,255,${(0.1 + 0.08 * Math.sin(t * 6)).toFixed(3)})`
     ctx.fillRect(bx, topY, bw, botY - topY)
   }
-  if (dark) {
+  if (sick) {
+    // purple wash, scanlines rolling down and a pulsing skull
+    ctx.fillStyle = `rgba(150,50,255,${(0.2 + 0.08 * Math.sin(t * 7)).toFixed(3)})`
+    ctx.fillRect(bx, topY, bw, botY - topY)
+    ctx.fillStyle = 'rgba(200,140,255,0.35)'
+    const roll = (t * T * 0.9) % (fh * 0.34)
+    for (let sy = frontY + roll; sy < botY; sy += fh * 0.34) ctx.fillRect(bx, sy, bw, Math.max(1, T * 0.025))
+    if (dark) {
+      ctx.fillStyle = 'rgba(4,5,8,0.4)'
+      ctx.fillRect(bx, frontY, bw, fh)
+    }
+    const k = 1 + 0.08 * Math.sin(t * 6)
+    drawGlyph(ctx, 'skull', bx + bw / 2, frontY + fh * 0.5, T * 0.56 * k, '#e2b8ff', true, 2.6)
+  } else if (dark) {
     ctx.fillStyle = 'rgba(4,5,8,0.5)'
     ctx.fillRect(bx, frontY, bw, fh)
     ctx.globalAlpha = 0.72 + 0.28 * Math.sin(t * 4)
     drawGlyph(ctx, 'cross', bx + bw / 2, frontY + fh / 2, T * 0.56, COLORS.alert, true, 3)
     ctx.globalAlpha = 1
+  } else if (slow) {
+    drawGlyph(ctx, 'slow', bx + bw * 0.72, frontY + fh * 0.8, T * 0.36, COLORS.customer, true, 2.6)
   } else if (degraded) {
     drawGlyph(ctx, 'wifiOff', bx + bw * 0.74, frontY + fh * 0.82, T * 0.3, COLORS.warn, false, 3)
   } else if (r.onBattery) {
     drawGlyph(ctx, 'bolt', bx + bw * 0.74, frontY + fh * 0.82, T * 0.3, COLORS.power, false, 3)
+  }
+  if (r.infecting > 0 && !sick) {
+    // a virus is latched on: the cabinet flickers purple more and more
+    const a = r.infecting * (0.35 + 0.25 * Math.sin(t * 22))
+    ctx.fillStyle = `rgba(176,77,255,${a.toFixed(3)})`
+    ctx.fillRect(bx, frontY, bw, fh)
   }
 
   // status frame
@@ -1260,6 +1395,648 @@ function drawPlayer(ctx: Ctx, s: Scene) {
   }
 }
 
+/* ---------- customers ---------- */
+
+// light and saturated enough to stand out on the dark floor
+const SUITS: [string, string][] = [
+  ['#4f78b8', '#36578c'],
+  ['#9aa1ad', '#737a86'],
+  ['#c39a62', '#977443'],
+  ['#9b3446', '#722332'],
+  ['#2f8f86', '#226861'],
+  ['#7457b0', '#553f86'],
+]
+const TIES = ['#e8102a', '#1ec8ff', '#ffb020', '#39ff7a', '#b04dff', '#ff6ec7']
+const SKINS = ['#f3c9a0', '#e5b48a', '#c98e5d', '#8d5a36', '#f6d7bd']
+const HAIRS = ['#2a1a0f', '#5b3516', '#a0522d', '#d8b26a', '#151515', '#9a9a9a']
+type Prop = 'coffee' | 'laptop' | 'phone'
+const PROPS: Prop[] = ['coffee', 'laptop', 'phone']
+
+function lookOf(seed: number) {
+  return {
+    suit: SUITS[seed % SUITS.length],
+    tie: TIES[Math.floor(seed / 7) % TIES.length],
+    skin: SKINS[Math.floor(seed / 43) % SKINS.length],
+    hair: HAIRS[Math.floor(seed / 211) % HAIRS.length],
+    /** 0 short, 1 side part, 2 bun, 3 long, 4 bald */
+    style: Math.floor(seed / 1051) % 5,
+    prop: PROPS[Math.floor(seed / 5003) % PROPS.length],
+  }
+}
+
+/** A blocky business visitor in the technician's style: suit, tie, a coffee cup, laptop or phone. */
+function drawCustomer(ctx: Ctx, s: Scene, c: Customer) {
+  const { T, time: t } = s
+  const k = T / 48
+  const L = lookOf(c.look)
+  // fade in / out at the far end of the entrance walk outside the hall
+  const alpha = clamp((c.x + 0.95) / 0.4, 0, 1)
+  if (alpha <= 0) return
+  // a waiting customer turns towards the technician when he comes close
+  let dir: Dir = c.dir
+  if (!c.moving && c.state !== 'leave') {
+    const dx = s.player.x - c.x
+    const dy = s.player.y - c.y
+    if (Math.hypot(dx, dy) < 2.4) dir = Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? 'right' : 'left') : dy > 0 ? 'down' : 'up'
+  }
+  const angry = c.mood === 'angry'
+  const happy = c.mood === 'happy'
+  const shake = angry && c.moodT < 1.4 ? Math.sin(t * 60) * 1.2 * k : 0
+  const x = c.x * T + shake
+  const y = c.y * T
+  const swing = c.moving ? Math.sin(c.walk) : 0
+  const tapping = !c.moving && c.state === 'wait' && c.patience < c.patienceMax * 0.6 && Math.sin(t * 10) > 0.55
+  const bob = c.moving ? Math.abs(Math.sin(c.walk)) * 2 * k : happy ? Math.abs(Math.sin(t * 8)) * 2 * k : Math.sin(t * 2) * 0.5 * k
+  const side = dir === 'left' ? -1 : dir === 'right' ? 1 : 0
+  const back = dir === 'up'
+  ctx.save()
+  ctx.globalAlpha = alpha
+
+  ctx.fillStyle = 'rgba(0,0,0,0.4)'
+  ctx.beginPath()
+  ctx.ellipse(x, y + 1 * k, 10.5 * k, 4.2 * k, 0, 0, Math.PI * 2)
+  ctx.fill()
+
+  // trousers + shoes (one foot taps when patience runs low)
+  const legW = 6 * k
+  const legH = 10 * k
+  for (const sgn of [-1, 1]) {
+    const lift = c.moving ? Math.max(0, swing * sgn) * 3.5 * k : tapping && sgn === 1 ? 2.5 * k : 0
+    const lx = x + sgn * 4 * k - legW / 2 + (side ? swing * sgn * 2.5 * k : 0)
+    ctx.fillStyle = L.suit[1]
+    ctx.fillRect(lx, y - legH - lift, legW, legH - 3 * k)
+    ctx.fillStyle = '#0e0f13'
+    ctx.fillRect(lx - 0.5 * k, y - 3.5 * k - lift, legW + 1 * k, 3.5 * k)
+  }
+
+  // jacket
+  const bw = 19 * k
+  const bh = 17 * k
+  const by = y - 9 * k - bh - bob
+  const bxl = x - bw / 2
+  roundRectPath(ctx, bxl, by, bw, bh, 5 * k)
+  ctx.fillStyle = L.suit[0]
+  ctx.fill()
+  ctx.fillStyle = 'rgba(255,255,255,0.12)'
+  ctx.fillRect(bxl + 2 * k, by + 1.5 * k, bw - 4 * k, 1.5 * k)
+  if (back) {
+    ctx.fillStyle = L.suit[1]
+    ctx.fillRect(x - 0.6 * k, by + bh * 0.45, 1.2 * k, bh * 0.5)
+  } else {
+    // white shirt V and the tie (shifted towards the side the visitor faces)
+    const vx = x + side * 3.5 * k
+    ctx.fillStyle = '#f2f4f8'
+    ctx.beginPath()
+    ctx.moveTo(vx - 4 * k, by + 0.5 * k)
+    ctx.lineTo(vx + 4 * k, by + 0.5 * k)
+    ctx.lineTo(vx, by + 9.5 * k)
+    ctx.closePath()
+    ctx.fill()
+    ctx.fillStyle = L.tie
+    ctx.beginPath()
+    ctx.moveTo(vx - 1.3 * k, by + 1.5 * k)
+    ctx.lineTo(vx + 1.3 * k, by + 1.5 * k)
+    ctx.lineTo(vx + 1.6 * k, by + 8.5 * k)
+    ctx.lineTo(vx, by + 10.5 * k)
+    ctx.lineTo(vx - 1.6 * k, by + 8.5 * k)
+    ctx.closePath()
+    ctx.fill()
+    // lapels
+    ctx.strokeStyle = L.suit[1]
+    ctx.lineWidth = 1.2 * k
+    ctx.beginPath()
+    ctx.moveTo(vx - 4.5 * k, by + 0.5 * k)
+    ctx.lineTo(vx - 1 * k, by + 10 * k)
+    ctx.moveTo(vx + 4.5 * k, by + 0.5 * k)
+    ctx.lineTo(vx + 1 * k, by + 10 * k)
+    ctx.stroke()
+  }
+
+  // arms: the prop hand is raised while waiting (coffee at the chest, phone at the ear)
+  const armW = 4.8 * k
+  const armH = 12 * k
+  const propSide = side || 1
+  for (const sgn of [-1, 1]) {
+    const ax = x + sgn * (bw / 2 + 0.5 * k) - armW / 2
+    let ay = by + 2.5 * k
+    let ah = armH
+    const holding = sgn === propSide && !c.moving && L.prop !== 'laptop'
+    if (holding) {
+      ay -= L.prop === 'phone' ? 7 * k : 3 * k
+      ah = armH * 0.75
+    } else if (c.moving) ay += swing * sgn * -2.2 * k
+    if (angry && c.moodT < 1.6 && sgn !== propSide) {
+      // fist in the air
+      ay -= 9 * k + Math.abs(Math.sin(t * 18)) * 2 * k
+      ah = armH * 0.8
+    }
+    roundRectPath(ctx, ax, ay, armW, ah, 2.2 * k)
+    ctx.fillStyle = L.suit[1]
+    ctx.fill()
+    const handY = holding || (angry && c.moodT < 1.6 && sgn !== propSide) ? ay - 1.5 * k : ay + ah - 3 * k
+    ctx.fillStyle = L.skin
+    ctx.fillRect(ax + 0.4 * k, handY, armW - 0.8 * k, 3.6 * k)
+    if (sgn !== propSide) continue
+    const hx = ax + armW / 2
+    if (L.prop === 'coffee' && !back) {
+      // takeaway cup with a sleeve and a lid; steam while it is still hot
+      const cy = holding ? handY - 5 * k : handY + 1 * k
+      ctx.fillStyle = '#f4efe6'
+      ctx.fillRect(hx - 2.6 * k, cy, 5.2 * k, 6.5 * k)
+      ctx.fillStyle = '#8b5a2b'
+      ctx.fillRect(hx - 2.6 * k, cy + 2.2 * k, 5.2 * k, 2.2 * k)
+      ctx.fillStyle = '#ffffff'
+      ctx.fillRect(hx - 3 * k, cy - 1.2 * k, 6 * k, 1.4 * k)
+      if (holding) {
+        ctx.strokeStyle = 'rgba(255,255,255,0.35)'
+        ctx.lineWidth = 1 * k
+        const ph = (t * 1.5) % 1
+        ctx.beginPath()
+        ctx.moveTo(hx, cy - 2 * k - ph * 4 * k)
+        ctx.quadraticCurveTo(hx + 2 * k, cy - 4 * k - ph * 4 * k, hx, cy - 6.5 * k - ph * 4 * k)
+        ctx.stroke()
+      }
+    } else if (L.prop === 'laptop') {
+      // laptop tucked under the arm
+      ctx.fillStyle = '#9aa3b2'
+      ctx.fillRect(hx - (side ? 6 : 1.6) * k, by + 4 * k, (side ? 12 : 3.2) * k, (side ? 2.4 : 10) * k)
+      ctx.fillStyle = '#5d6573'
+      ctx.fillRect(hx - (side ? 6 : 1.6) * k, by + (side ? 6 : 13.6) * k, (side ? 12 : 3.2) * k, 0.8 * k)
+    } else if (L.prop === 'phone') {
+      ctx.fillStyle = '#101218'
+      ctx.fillRect(hx - 1.6 * k, handY - (holding ? 3 : 0) * k, 3.2 * k, 5.6 * k)
+      ctx.fillStyle = 'rgba(30,200,255,0.8)'
+      ctx.fillRect(hx - 1 * k, handY - (holding ? 2.4 : -0.6) * k, 2 * k, 3.4 * k)
+    }
+  }
+
+  // head + hair
+  const hw = 17 * k
+  const hh = 15.5 * k
+  const hx = x - hw / 2 + side * 1.5 * k
+  const hy = by - hh + 3 * k
+  const skin = angry && c.moodT < 3 ? '#e8826f' : L.skin
+  if (L.style === 2) {
+    // bun
+    ctx.fillStyle = L.hair
+    ctx.beginPath()
+    ctx.arc(x + side * 1.5 * k, hy - 1.5 * k, 4 * k, 0, Math.PI * 2)
+    ctx.fill()
+  }
+  if (L.style === 3) {
+    // long hair falls behind the shoulders
+    ctx.fillStyle = L.hair
+    roundRectPath(ctx, hx - 1 * k, hy + 3 * k, hw + 2 * k, hh + 3 * k, 4 * k)
+    ctx.fill()
+  }
+  roundRectPath(ctx, hx, hy, hw, hh, 6 * k)
+  ctx.fillStyle = back && L.style !== 4 ? L.hair : skin
+  ctx.fill()
+  if (!back) {
+    if (L.style !== 4) {
+      ctx.save()
+      roundRectPath(ctx, hx, hy, hw, hh, 6 * k)
+      ctx.clip()
+      ctx.fillStyle = L.hair
+      ctx.fillRect(hx, hy, hw, L.style === 1 ? 5.5 * k : 5 * k)
+      if (L.style === 1) ctx.fillRect(side >= 0 ? hx : hx + hw - 7 * k, hy, 7 * k, 7.5 * k)
+      if (L.style === 3) {
+        ctx.fillRect(hx, hy, 3 * k, hh)
+        ctx.fillRect(hx + hw - 3 * k, hy, 3 * k, hh)
+      }
+      ctx.restore()
+    } else {
+      // bald on top, a little hair round the sides
+      ctx.fillStyle = L.hair
+      ctx.fillRect(hx, hy + 6 * k, 2.2 * k, 4 * k)
+      ctx.fillRect(hx + hw - 2.2 * k, hy + 6 * k, 2.2 * k, 4 * k)
+      ctx.fillStyle = 'rgba(255,255,255,0.25)'
+      ctx.fillRect(hx + 4 * k, hy + 1.5 * k, hw - 8 * k, 1.5 * k)
+    }
+    // face: eyes, brows and mouth show the mood
+    const ey = hy + 8.6 * k
+    const eyeXs = side ? [x + side * 5.2 * k] : [x - 3.6 * k, x + 3.6 * k]
+    ctx.fillStyle = '#1a120c'
+    for (const ex of eyeXs) ctx.fillRect(ex - 1.1 * k, ey, 2.2 * k, 2.6 * k)
+    const cross = c.mood === 'upset' || angry
+    if (cross) {
+      ctx.strokeStyle = '#1a120c'
+      ctx.lineWidth = 1.3 * k
+      ctx.beginPath()
+      for (const ex of eyeXs) {
+        const inner = side ? -side : ex < x ? 1 : -1
+        ctx.moveTo(ex - inner * 2 * k, ey - 2.6 * k)
+        ctx.lineTo(ex + inner * 1.6 * k, ey - 1.2 * k)
+      }
+      ctx.stroke()
+    }
+    const mx = x + side * 3 * k
+    const my = hy + hh - 3.4 * k
+    ctx.strokeStyle = '#4a1e14'
+    ctx.lineWidth = 1.3 * k
+    ctx.beginPath()
+    if (happy || c.mood === 'calm') ctx.arc(mx, my - 1.6 * k, 2.4 * k, 0.2 * Math.PI, 0.8 * Math.PI)
+    else if (angry) {
+      ctx.fillStyle = '#4a1e14'
+      ctx.ellipse(mx, my, 2.2 * k, 1.5 * k + Math.abs(Math.sin(t * 16)) * 0.8 * k, 0, 0, Math.PI * 2)
+      ctx.fill()
+    } else ctx.arc(mx, my + 1.4 * k, 2.4 * k, 1.2 * Math.PI, 1.8 * Math.PI)
+    ctx.stroke()
+  }
+  // steam puffs over an angry head
+  if (angry && c.moodT < 3) {
+    for (let i = 0; i < 2; i++) {
+      const ph = (t * 1.8 + i * 0.5) % 1
+      ctx.fillStyle = `rgba(255,255,255,${(0.55 * (1 - ph)).toFixed(3)})`
+      ctx.beginPath()
+      ctx.arc(x + (i ? 6 : -6) * k + (i ? 3 : -3) * k * ph, hy - 2 * k - ph * 9 * k, (2 + ph * 3) * k, 0, Math.PI * 2)
+      ctx.fill()
+    }
+  }
+  ctx.restore()
+}
+
+/* ---------- speech bubbles ---------- */
+
+interface Seg {
+  text: string
+  hi: boolean
+}
+const wrapCache = new Map<string, Seg[][]>()
+
+/** Word-wraps `text` into at most `maxLines` lines; words of `highlight` (the rack name) are marked. */
+function wrapBubble(ctx: Ctx, text: string, highlight: string, maxW: number, fontPx: number, maxLines: number): Seg[][] {
+  const key = `${text}|${highlight}|${Math.round(maxW)}|${fontPx}`
+  const hit = wrapCache.get(key)
+  if (hit) return hit
+  const words = text.split(' ')
+  const hiWords = new Set<number>()
+  const hw = highlight ? highlight.split(' ') : []
+  for (let i = 0; hw.length && i + hw.length <= words.length; i++) {
+    if (hw.every((h, j) => words[i + j].replace(/[!?.,]+$/, '') === h)) {
+      // the rack name never breaks across lines
+      words.splice(i, hw.length, words.slice(i, i + hw.length).join(' '))
+      hiWords.add(i)
+      break
+    }
+  }
+  const lines: Seg[][] = []
+  let line: Seg[] = []
+  let lineText = ''
+  words.forEach((word, i) => {
+    const next = lineText ? `${lineText} ${word}` : word
+    if (lineText && ctx.measureText(next).width > maxW && lines.length < maxLines - 1) {
+      lines.push(line)
+      line = []
+      lineText = word
+    } else lineText = next
+    line.push({ text: line.length ? ` ${word}` : word, hi: hiWords.has(i) })
+  })
+  lines.push(line)
+  if (wrapCache.size > 120) wrapCache.clear()
+  wrapCache.set(key, lines)
+  return lines
+}
+
+interface BubbleOpts {
+  highlight?: string
+  border: string
+  fill?: string
+  ink?: string
+  ring?: { k: number; label: string; color: string }
+  glyph?: { name: GlyphName; color: string }
+  pop?: number
+}
+
+interface BubbleBox {
+  ax: number
+  ay: number
+  x: number
+  y: number
+  w: number
+  h: number
+  lines: Seg[][]
+  fontPx: number
+  lineH: number
+  pad: number
+  ringR: number
+  iconW: number
+  opts: BubbleOpts
+}
+
+/**
+ * Measures a speech bubble whose tail points at (ax, ay) – world px – and keeps it
+ * inside the visible part of the hall. `ring` adds a patience gauge with the
+ * seconds left on the left side.
+ */
+function layoutBubble(ctx: Ctx, s: Scene, ax: number, ay: number, text: string, opts: BubbleOpts): BubbleBox {
+  const fontPx = Math.round(clamp(s.T * 0.28, 11.5, 14))
+  ctx.font = `800 ${fontPx}px ${FONT}`
+  const maxW = clamp(s.T * 4.1, 150, 210)
+  const lines = wrapBubble(ctx, text, opts.highlight ?? '', maxW, fontPx, 2)
+  let textW = 0
+  for (const l of lines) textW = Math.max(textW, ctx.measureText(l.map((p) => p.text).join('')).width)
+  const lineH = fontPx * 1.18
+  const pad = fontPx * 0.6
+  const ringR = opts.ring ? fontPx * 0.95 : 0
+  const iconW = opts.ring ? ringR * 2 + pad * 0.8 : opts.glyph ? fontPx * 1.5 + pad * 0.5 : 0
+  const w = textW + pad * 2 + iconW
+  const h = Math.max(lines.length * lineH + pad * 1.3, ringR * 2 + pad)
+  const minX = s.camX + s.safe.l + 6
+  const maxX = s.camX + s.W - s.safe.r - 6
+  const x = clamp(ax - w / 2, minX, Math.max(minX, maxX - w))
+  const y = Math.max(s.camY + s.safe.t + 4, ay - h - 9)
+  return { ax, ay, x, y, w, h, lines, fontPx, lineH, pad, ringR, iconW, opts }
+}
+
+function paintBubble(ctx: Ctx, b: BubbleBox) {
+  const { ax, ay, x, y, w, h, opts, fontPx, pad, ringR, lineH } = b
+  const pop = opts.pop ?? 1
+  ctx.save()
+  if (pop < 1) {
+    const sc = 0.6 + 0.4 * pop
+    ctx.translate(ax, ay)
+    ctx.scale(sc, sc)
+    ctx.translate(-ax, -ay)
+    ctx.globalAlpha *= clamp(pop * 1.6, 0, 1)
+  }
+  // tail (it stretches when the bubble had to move up to clear another one)
+  const tx = clamp(ax, x + 10, x + w - 10)
+  ctx.fillStyle = opts.border
+  ctx.beginPath()
+  ctx.moveTo(tx - 7, y + h - 1)
+  ctx.lineTo(tx + 7, y + h - 1)
+  ctx.lineTo(clamp(ax, tx - 12, tx + 12), Math.max(y + h + 8, ay - 1))
+  ctx.closePath()
+  ctx.fill()
+  roundRectPath(ctx, x, y, w, h, Math.min(12, h / 2))
+  ctx.fillStyle = opts.fill ?? '#f7f8fc'
+  ctx.fill()
+  ctx.lineWidth = 2.5
+  ctx.strokeStyle = opts.border
+  ctx.stroke()
+  let cx = x + pad
+  ctx.font = `800 ${fontPx}px ${FONT}`
+  if (opts.ring) {
+    const rcx = cx + ringR
+    const rcy = y + h / 2
+    ctx.lineWidth = Math.max(3, fontPx * 0.28)
+    ctx.strokeStyle = 'rgba(20,24,32,0.14)'
+    ctx.beginPath()
+    ctx.arc(rcx, rcy, ringR - 1.5, 0, Math.PI * 2)
+    ctx.stroke()
+    ctx.strokeStyle = opts.ring.color
+    ctx.lineCap = 'round'
+    ctx.beginPath()
+    ctx.arc(rcx, rcy, ringR - 1.5, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * clamp(opts.ring.k, 0.001, 1))
+    ctx.stroke()
+    ctx.lineCap = 'butt'
+    ctx.fillStyle = '#1b1e27'
+    ctx.font = `800 ${Math.round(fontPx * 0.82)}px ${FONT}`
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'middle'
+    ctx.fillText(opts.ring.label, rcx, rcy + 0.5)
+    ctx.font = `800 ${fontPx}px ${FONT}`
+    cx += b.iconW
+  } else if (opts.glyph) {
+    drawGlyph(ctx, opts.glyph.name, cx + fontPx * 0.7, y + h / 2, fontPx * 1.4, opts.glyph.color, false, 2.6)
+    cx += b.iconW
+  }
+  ctx.textAlign = 'left'
+  ctx.textBaseline = 'middle'
+  const y0 = y + h / 2 - ((b.lines.length - 1) * lineH) / 2 + 0.5
+  b.lines.forEach((line, i) => {
+    let lx = cx
+    for (const seg of line) {
+      ctx.fillStyle = seg.hi ? '#d6157f' : (opts.ink ?? '#171a22')
+      ctx.fillText(seg.text, lx, y0 + i * lineH)
+      lx += ctx.measureText(seg.text).width
+    }
+  })
+  ctx.restore()
+}
+
+/** Seconds the technician's "We're on it!" stays up before the visitor answers. */
+export const TALK_BEAT = 1.5
+const HAPPY_LINE = "Thanks – it's fast again!"
+const ANGRY_LINE = "That's it – I'm escalating!"
+const CALM_LINE = 'OK – please hurry!'
+const placed: BubbleBox[] = []
+
+/**
+ * True when screen point (sx, sy) lies in the visible play area. Off-screen speakers
+ * get an edge arrow instead of a speech bubble, so the two never pile up on the border.
+ */
+function onScreen(s: Scene, sx: number, sy: number): boolean {
+  return sx >= s.safe.l + 12 && sx <= s.W - s.safe.r - 12 && sy >= s.safe.t + 12 && sy <= s.H - s.safe.b - 12
+}
+
+function drawBubbles(ctx: Ctx, s: Scene) {
+  const { T, world: w } = s
+  placed.length = 0
+  for (const c of w.customers) {
+    const ax = c.x * T
+    const ay = (c.y - 0.98) * T
+    if (s.scrolling && !onScreen(s, ax - s.camX, (c.y - 0.45) * T - s.camY)) continue
+    const rack = w.rackById.get(c.rackId)
+    if (c.mood === 'happy') {
+      if (c.moodT < 2.8) placed.push(layoutBubble(ctx, s, ax, ay, HAPPY_LINE, { border: COLORS.ok, glyph: { name: 'thumb', color: '#13a34a' }, pop: clamp(c.moodT / 0.2, 0, 1) }))
+      continue
+    }
+    if (c.mood === 'angry') {
+      if (c.moodT < 2.8) placed.push(layoutBubble(ctx, s, ax, ay, ANGRY_LINE, { border: COLORS.alert, fill: '#2a0b10', ink: '#ffd6d9', glyph: { name: 'cross', color: '#ff5a66' }, pop: clamp(c.moodT / 0.2, 0, 1) }))
+      continue
+    }
+    // TALK is a two-beat exchange: the technician speaks first, then the visitor answers
+    if (c.mood === 'calm' && c.moodT < TALK_BEAT) continue
+    const k = c.patience / c.patienceMax
+    const ring = { k, label: String(Math.ceil(c.patience)), color: k < 0.34 ? COLORS.alert : k < 0.6 ? COLORS.warn : '#16b85a' }
+    const calm = c.mood === 'calm' && c.moodT < TALK_BEAT + 2.2
+    const urgent = c.patience < 8 && Math.floor(s.time * 4) % 2 === 0
+    placed.push(
+      layoutBubble(ctx, s, ax, ay, calm ? CALM_LINE : c.complaint, {
+        highlight: calm ? '' : (rack?.name ?? ''),
+        border: urgent ? COLORS.alert : COLORS.customer,
+        ring,
+        pop: clamp(c.age / 0.3, 0, 1),
+      }),
+    )
+  }
+  const say = s.techSay
+  if (say && say.t < TALK_BEAT + 0.1) {
+    placed.push(layoutBubble(ctx, s, s.player.x * T, (s.player.y - 0.98) * T, say.text, { border: COLORS.cooling, glyph: { name: 'chat', color: '#0b8fc2' }, pop: clamp(say.t / 0.18, 0, 1) }))
+  }
+  // never on top of each other: the lower speaker keeps its place, the next one moves up
+  placed.sort((a, b) => b.ay - a.ay)
+  for (let i = 1; i < placed.length; i++) {
+    const b = placed[i]
+    for (let j = 0; j < i; j++) {
+      const o = placed[j]
+      if (b.x < o.x + o.w + 4 && o.x < b.x + b.w + 4 && b.y < o.y + o.h + 4 && o.y < b.y + b.h + 4) b.y = o.y - b.h - 6
+    }
+  }
+  for (const b of placed) paintBubble(ctx, b)
+}
+
+/* ---------- virus ---------- */
+
+let virusGlow: HTMLCanvasElement | null = null
+
+function glowSprite(): HTMLCanvasElement {
+  if (virusGlow) return virusGlow
+  const c = document.createElement('canvas')
+  c.width = 64
+  c.height = 64
+  const g = c.getContext('2d')
+  if (g) {
+    const grad = g.createRadialGradient(32, 32, 0, 32, 32, 32)
+    grad.addColorStop(0, 'rgba(190,110,255,0.9)')
+    grad.addColorStop(0.45, 'rgba(150,60,255,0.35)')
+    grad.addColorStop(1, 'rgba(120,40,255,0)')
+    g.fillStyle = grad
+    g.fillRect(0, 0, 64, 64)
+  }
+  virusGlow = c
+  return c
+}
+
+/** Glitchy purple bug-blob with acid-green eyes, a pixel trail and tendrils while it infects a rack. */
+function drawVirus(ctx: Ctx, s: Scene, v: Virus) {
+  const { T, time: t } = s
+  const born = v.mode === 'spawn' ? clamp(1 - v.spawnT / 0.9, 0, 1) : 1
+  const x = v.x * T
+  const y = v.y * T
+  const R = T * 0.3 * (0.3 + 0.7 * born)
+  const cy = y - T * 0.3
+  // trail of dying pixels
+  for (let i = 1; i < v.trail.length; i++) {
+    const p = v.trail[i]
+    const a = (1 - i / v.trail.length) * 0.7
+    const sz = Math.max(2, T * 0.07 * (1 - i / (v.trail.length + 2)))
+    ctx.fillStyle = i % 2 ? `rgba(176,77,255,${a.toFixed(3)})` : `rgba(180,255,57,${(a * 0.8).toFixed(3)})`
+    const jx = (hash(i * 7.3 + Math.floor(t * 10)) - 0.5) * T * 0.16
+    ctx.fillRect(p.x * T + jx - sz / 2, (p.y - 0.22) * T - sz / 2, sz, sz)
+  }
+  // glow + shadow
+  ctx.save()
+  ctx.globalCompositeOperation = 'lighter'
+  const gr = T * (0.9 + 0.1 * Math.sin(t * 6))
+  ctx.globalAlpha = 0.55 * born
+  ctx.drawImage(glowSprite(), x - gr, cy - gr, gr * 2, gr * 2)
+  ctx.restore()
+  ctx.fillStyle = 'rgba(0,0,0,0.35)'
+  ctx.beginPath()
+  ctx.ellipse(x, y + 1, R * 1.1, R * 0.4, 0, 0, Math.PI * 2)
+  ctx.fill()
+  // tendrils into the rack it is infecting
+  if (v.mode === 'dwell' && v.rackId) {
+    const r = s.world.rackById.get(v.rackId)
+    if (r) {
+      const fx = (r.cx + 0.5) * T
+      const fy = (r.cy + 0.55) * T
+      ctx.lineWidth = Math.max(1.5, T * 0.04)
+      for (let i = 0; i < 3; i++) {
+        ctx.strokeStyle = i === 1 ? 'rgba(180,255,57,0.75)' : 'rgba(176,77,255,0.8)'
+        ctx.beginPath()
+        ctx.moveTo(x, cy)
+        const wob = Math.sin(t * 9 + i * 2) * T * 0.18
+        ctx.quadraticCurveTo((x + fx) / 2 + wob + (i - 1) * T * 0.2, (cy + fy) / 2 - T * 0.15, fx + (i - 1) * T * 0.18, fy)
+        ctx.stroke()
+      }
+      // infection progress ring
+      const k = clamp(v.dwell / 2, 0, 1)
+      ctx.strokeStyle = 'rgba(20,10,30,0.7)'
+      ctx.lineWidth = 4
+      ctx.beginPath()
+      ctx.arc(x, cy, R + 6, 0, Math.PI * 2)
+      ctx.stroke()
+      ctx.strokeStyle = COLORS.toxic
+      ctx.lineWidth = 3
+      ctx.beginPath()
+      ctx.arc(x, cy, R + 6, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * k)
+      ctx.stroke()
+    }
+  }
+  const moving = Math.hypot(v.vx, v.vy) > 0.05
+  const seed = Number(v.id.replace(/\D/g, '')) || 1
+  const glitch = hash(Math.floor(t * 9) * 1.7 + seed * 13.1) > 0.78 || born < 1
+  const body = (ox: number, fill: string | CanvasGradient, alpha: number) => {
+    ctx.globalAlpha = alpha
+    ctx.beginPath()
+    const n = 12
+    for (let i = 0; i <= n; i++) {
+      const a = (i / n) * Math.PI * 2
+      const rr = R * (1 + 0.13 * Math.sin(3 * a + t * 6) + 0.07 * Math.sin(5 * a - t * 9))
+      const px = x + ox + Math.cos(a) * rr
+      const py = cy + Math.sin(a) * rr * 0.86
+      if (i === 0) ctx.moveTo(px, py)
+      else ctx.lineTo(px, py)
+    }
+    ctx.closePath()
+    ctx.fillStyle = fill
+    ctx.fill()
+  }
+  ctx.save()
+  // legs scuttle while it moves
+  ctx.strokeStyle = '#3d0d6b'
+  ctx.lineWidth = Math.max(1.5, T * 0.035)
+  ctx.lineCap = 'round'
+  ctx.beginPath()
+  for (let i = 0; i < 3; i++) {
+    const ph = moving ? Math.sin(v.age * 22 + i * 2.1) * T * 0.05 : 0
+    const ly = cy + (i - 1) * R * 0.5
+    ctx.moveTo(x - R * 0.7, ly)
+    ctx.lineTo(x - R * 1.35, ly + R * 0.25 + ph)
+    ctx.moveTo(x + R * 0.7, ly)
+    ctx.lineTo(x + R * 1.35, ly + R * 0.25 - ph)
+  }
+  // antennae
+  ctx.moveTo(x - R * 0.35, cy - R * 0.7)
+  ctx.lineTo(x - R * 0.7, cy - R * 1.35)
+  ctx.moveTo(x + R * 0.35, cy - R * 0.7)
+  ctx.lineTo(x + R * 0.7, cy - R * 1.35)
+  ctx.stroke()
+  ctx.fillStyle = COLORS.toxic
+  ctx.fillRect(x - R * 0.7 - 2, cy - R * 1.35 - 2, 4, 4)
+  ctx.fillRect(x + R * 0.7 - 2, cy - R * 1.35 - 2, 4, 4)
+  if (glitch) {
+    // RGB split: ghost copies left and right
+    ctx.globalCompositeOperation = 'lighter'
+    body(-T * 0.06, 'rgba(255,40,180,0.9)', 0.5)
+    body(T * 0.06, 'rgba(120,255,60,0.9)', 0.45)
+    ctx.globalCompositeOperation = 'source-over'
+  }
+  const grad = ctx.createRadialGradient(x - R * 0.3, cy - R * 0.3, R * 0.1, x, cy, R * 1.1)
+  grad.addColorStop(0, '#e2b8ff')
+  grad.addColorStop(0.45, '#a243ff')
+  grad.addColorStop(1, '#4b0f8f')
+  body(0, grad, 1)
+  ctx.globalAlpha = 1
+  ctx.strokeStyle = COLORS.toxic
+  ctx.lineWidth = Math.max(1, T * 0.025)
+  ctx.stroke()
+  if (glitch) {
+    // a displaced slice of the body
+    const sy = cy + (hash(Math.floor(t * 9) + seed) - 0.5) * R
+    ctx.save()
+    ctx.beginPath()
+    ctx.rect(x - R * 1.5, sy, R * 3, R * 0.35)
+    ctx.clip()
+    ctx.translate((hash(Math.floor(t * 9) + seed + 3) - 0.5) * T * 0.3, 0)
+    body(0, '#c77dff', 1)
+    ctx.restore()
+  }
+  // eyes
+  const look = moving ? clamp(v.vx, -1, 1) * R * 0.15 : Math.sin(t * 1.3) * R * 0.1
+  for (const ex of [-0.38, 0.38]) {
+    ctx.fillStyle = COLORS.toxic
+    ctx.fillRect(x + ex * R - R * 0.2 + look, cy - R * 0.32, R * 0.4, R * 0.44)
+    ctx.fillStyle = '#12051f'
+    ctx.fillRect(x + ex * R - R * 0.07 + look * 1.6, cy - R * 0.2, R * 0.16, R * 0.22)
+  }
+  ctx.restore()
+}
+
 /* ---------- overlays ---------- */
 
 function drawShimmer(ctx: Ctx, s: Scene) {
@@ -1342,7 +2119,8 @@ function drawBadges(ctx: Ctx, s: Scene) {
   const { T, time: t, world: w } = s
   const seen = new Set<string>()
   for (const a of w.alerts) {
-    if (seen.has(a.targetId)) continue
+    // the roaming virus is its own (glowing) marker
+    if (a.type === 'virus' || seen.has(a.targetId)) continue
     seen.add(a.targetId)
     // the repair ring takes the badge's place while the job is running
     if (w.repair && w.repair.targetId === a.targetId) continue
@@ -1431,6 +2209,9 @@ function drawRepairRing(ctx: Ctx, s: Scene) {
   const cx = p.x * T
   const cy = p.y * T - 58 * k
   const R = Math.max(11, 13 * k)
+  // cleaning malware gets the virus colours, everything else the repair yellow
+  const clean = s.world.repair?.kind === 'clean'
+  const tone = clean ? '#c77dff' : '#ffd23f'
   ctx.save()
   ctx.fillStyle = 'rgba(8,10,14,0.85)'
   ctx.beginPath()
@@ -1443,18 +2224,18 @@ function drawRepairRing(ctx: Ctx, s: Scene) {
   ctx.stroke()
   const end = -Math.PI / 2 + Math.PI * 2 * clamp(p.repair, 0.02, 1)
   ctx.lineCap = 'round'
-  ctx.strokeStyle = 'rgba(255,210,63,0.25)'
+  ctx.strokeStyle = hexToRgba(tone, 0.25)
   ctx.lineWidth = 9
   ctx.beginPath()
   ctx.arc(cx, cy, R, -Math.PI / 2, end)
   ctx.stroke()
-  ctx.strokeStyle = '#ffd23f'
+  ctx.strokeStyle = tone
   ctx.lineWidth = 4
   ctx.beginPath()
   ctx.arc(cx, cy, R, -Math.PI / 2, end)
   ctx.stroke()
   ctx.restore()
-  drawGlyph(ctx, 'wrench', cx, cy, R * 1.25, '#ffffff')
+  drawGlyph(ctx, clean ? 'bug' : 'wrench', cx, cy, R * 1.25, '#ffffff')
 }
 
 let mistSprite: HTMLCanvasElement | null = null
@@ -1497,6 +2278,40 @@ function drawFx(ctx: Ctx, list: Fx[]) {
   for (const f of list) {
     if (f.kind === 'mist') continue
     const k = clamp(f.life / f.max, 0, 1)
+    if (f.kind === 'arc') {
+      // crackling malware / zap arc: a jagged line that re-rolls every few frames
+      const x2 = f.x2 ?? f.x
+      const y2 = f.y2 ?? f.y
+      const n = 7
+      const seed = Math.floor(f.life * 30)
+      const nx = -(y2 - f.y)
+      const ny = x2 - f.x
+      const nl = Math.hypot(nx, ny) || 1
+      ctx.globalAlpha = Math.min(1, k * 1.5)
+      for (const [wdt, col] of [
+        [f.size * 2.6, hexToRgba(f.color, 0.3)],
+        [f.size, f.color],
+      ] as const) {
+        ctx.strokeStyle = col
+        ctx.lineWidth = wdt
+        ctx.beginPath()
+        ctx.moveTo(f.x, f.y)
+        for (let i = 1; i < n; i++) {
+          const q = i / n
+          const off = (hash(seed * 7.7 + i * 3.1) - 0.5) * nl * 0.28
+          ctx.lineTo(f.x + (x2 - f.x) * q + (nx / nl) * off, f.y + (y2 - f.y) * q + (ny / nl) * off)
+        }
+        ctx.lineTo(x2, y2)
+        ctx.stroke()
+      }
+      continue
+    }
+    if (f.kind === 'pixel') {
+      ctx.globalAlpha = k
+      ctx.fillStyle = f.color
+      ctx.fillRect(f.x - f.size / 2, f.y - f.size / 2, f.size, f.size)
+      continue
+    }
     if (f.kind === 'smoke') {
       ctx.globalAlpha = 0.45 * k
       ctx.fillStyle = f.color
@@ -1535,15 +2350,8 @@ function drawEdgeArrows(ctx: Ctx, s: Scene) {
   const bot = H - s.safe.b - 22
   const cx = (l + r) / 2
   const cy = (top + bot) / 2
-  const seen = new Set<string>()
-  for (const a of w.alerts) {
-    if (seen.has(a.targetId)) continue
-    seen.add(a.targetId)
-    const box = boxOf(w, a.targetId)
-    if (!box) continue
-    const sx = box.fx * T - s.camX
-    const sy = box.fy * T - s.camY
-    if (sx >= l - 10 && sx <= r + 10 && sy >= top - 10 && sy <= bot + 10) continue
+  const arrow = (sx: number, sy: number, color: string, glyph: GlyphName, seed: number) => {
+    if (onScreen(s, sx, sy)) return
     // clamp onto the border of the visible area, pointing at the target
     const dx = sx - cx
     const dy = sy - cy
@@ -1551,8 +2359,7 @@ function drawEdgeArrows(ctx: Ctx, s: Scene) {
     const ex = cx + dx * k
     const ey = cy + dy * k
     const ang = Math.atan2(dy, dx)
-    const color = ALERT_COLOR[a.type]
-    const pulse = 1 + 0.08 * Math.sin(t * 8 + a.id)
+    const pulse = 1 + 0.08 * Math.sin(t * 8 + seed)
     ctx.save()
     ctx.translate(ex, ey)
     ctx.fillStyle = hexToRgba(color, 0.2)
@@ -1575,7 +2382,19 @@ function drawEdgeArrows(ctx: Ctx, s: Scene) {
     ctx.closePath()
     ctx.fill()
     ctx.restore()
-    drawGlyph(ctx, ALERT_GLYPH[a.type], ex, ey, 17, '#ffffff', false, 2.8)
+    drawGlyph(ctx, glyph, ex, ey, 17, '#ffffff', false, 2.8)
+  }
+  const seen = new Set<string>()
+  for (const a of w.alerts) {
+    if (seen.has(a.targetId)) continue
+    seen.add(a.targetId)
+    const box = boxOf(w, a.targetId)
+    if (!box) continue
+    arrow(box.fx * T - s.camX, box.fy * T - s.camY, ALERT_COLOR[a.type], ALERT_GLYPH[a.type], a.id)
+  }
+  // waiting customers (TALK buys time) get their own pink arrow
+  for (const c of w.customers) {
+    if (c.state !== 'leave') arrow(c.x * T - s.camX, (c.y - 0.45) * T - s.camY, COLORS.customer, 'person', c.look)
   }
 }
 
@@ -1702,6 +2521,43 @@ function sortedSprites(w: World): Sorted[] {
   return list
 }
 
+/** Sliding glass doors of the visitor entrance: they open as somebody walks up to them. */
+function drawDoor(ctx: Ctx, s: Scene) {
+  const d = s.world.hall.door
+  if (!d) return
+  const { T, world: w, time: t } = s
+  let near = Infinity
+  for (const c of w.customers) near = Math.min(near, Math.hypot((c.x - 0.5) * 0.8, c.y - (d.y + 0.5)))
+  const open = clamp(2.1 - near, 0, 1)
+  const x = T * 0.4
+  const wd = T * 0.2
+  const y = d.y * T
+  const half = T / 2
+  const slide = half * 0.94 * open
+  ctx.save()
+  ctx.beginPath()
+  ctx.rect(x - 2, y, wd + 4, T)
+  ctx.clip()
+  ctx.fillStyle = 'rgba(110,210,255,0.3)'
+  ctx.fillRect(x, y - slide, wd, half)
+  ctx.fillRect(x, y + half + slide, wd, half)
+  ctx.fillStyle = 'rgba(200,240,255,0.9)'
+  ctx.fillRect(x, y + half - slide - 2, wd, 2)
+  ctx.fillRect(x, y + half + slide, wd, 2)
+  ctx.restore()
+  // status light beside the doorway: pink while it is open, a slow blink while it waits
+  const lit = open > 0.05 || Math.floor(t * 1.2) % 2 === 0
+  ctx.fillStyle = open > 0.05 ? COLORS.customer : lit ? 'rgba(255,110,199,0.5)' : 'rgba(255,110,199,0.18)'
+  ctx.fillRect(T * 0.08, y + half - T * 0.16, Math.max(2, T * 0.06), T * 0.32)
+}
+
+interface Dynamic {
+  base: number
+  customer: Customer | null
+  virus: Virus | null
+}
+const dynamicList: Dynamic[] = []
+
 export function drawScene(ctx: Ctx, s: Scene) {
   const { T, W, H, world: w } = s
   drawVoid(ctx, s)
@@ -1709,36 +2565,52 @@ export function drawScene(ctx: Ctx, s: Scene) {
   ctx.translate(-s.camX + s.shakeX, -s.camY + s.shakeY)
   const layer = s.staticLayer
   if (layer) ctx.drawImage(layer.canvas, -layer.margin, -layer.margin, w.hall.cols * T + layer.margin * 2, w.hall.rows * T + layer.margin * 2)
+  drawDoor(ctx, s)
   drawPipes(ctx, s)
   drawPad(ctx, s)
   drawFloorFx(ctx, s)
 
-  // depth-sorted cabinets with the technician slotted in by his feet
+  // depth-sorted cabinets with the technician, visitors and viruses slotted in by their feet
   const minX = s.camX / T - 2.5
   const maxX = (s.camX + W) / T + 0.5
   const minY = s.camY / T - 2.5
   const maxY = (s.camY + H) / T + 0.6
-  let playerDrawn = false
+  dynamicList.length = 0
+  dynamicList.push({ base: s.player.y, customer: null, virus: null })
+  for (const c of w.customers) dynamicList.push({ base: c.y, customer: c, virus: null })
+  for (const v of w.viruses) dynamicList.push({ base: v.y, customer: null, virus: v })
+  dynamicList.sort((a, b) => a.base - b.base)
+  let di = 0
+  const drawDynamic = (d: Dynamic) => {
+    if (d.customer) drawCustomer(ctx, s, d.customer)
+    else if (d.virus) drawVirus(ctx, s, d.virus)
+    else drawPlayer(ctx, s)
+  }
   for (const item of sortedSprites(w)) {
-    if (!playerDrawn && s.player.y < item.base) {
-      drawPlayer(ctx, s)
-      playerDrawn = true
-    }
+    while (di < dynamicList.length && dynamicList[di].base < item.base) drawDynamic(dynamicList[di++])
     const o = item.rack ?? item.station!
     if (o.cx > maxX || o.cx < minX || o.cy > maxY || o.cy < minY) continue
     if (item.rack) drawRack(ctx, s, item.rack)
     else if (item.station!.h === 2) drawSideStation(ctx, s, item.station!)
     else drawTopStation(ctx, s, item.station!)
   }
-  if (!playerDrawn) drawPlayer(ctx, s)
+  while (di < dynamicList.length) drawDynamic(dynamicList[di++])
 
   drawShimmer(ctx, s)
   drawFx(ctx, s.fx)
   drawParticles(ctx, s.particles)
+  if (s.drone) {
+    // the drone lives in screen space; drawn here so the alert badges stay on top of it
+    ctx.save()
+    ctx.translate(s.camX - s.shakeX, s.camY - s.shakeY)
+    s.drone(ctx)
+    ctx.restore()
+  }
   if (s.live) {
     drawBadges(ctx, s)
     drawGuide(ctx, s)
     drawRepairRing(ctx, s)
+    drawBubbles(ctx, s)
   }
   drawFloatTexts(ctx, s.floats)
   ctx.restore()
@@ -1791,7 +2663,30 @@ export function drawMiniMap(ctx: Ctx, mw: number, mh: number, s: Scene) {
     ctx.lineWidth = 1.5
     ctx.strokeRect(ox + vx * sc, oy + vy * sc, (vx2 - vx) * sc, (vy2 - vy) * sc)
   }
-  // alert markers
+  // the entrance
+  const door = hall.door
+  if (door) {
+    ctx.fillStyle = COLORS.customer
+    ctx.fillRect(ox + sc * 0.25, oy + door.y * sc, Math.max(2, sc * 0.5), sc)
+  }
+  // visitors: a pink figure with a patience arc
+  for (const c of w.customers) {
+    if (c.x < 0.3) continue
+    const px = ox + c.x * sc
+    const py = oy + (c.y - 0.3) * sc
+    ctx.fillStyle = c.mood === 'angry' ? COLORS.alert : c.mood === 'happy' ? COLORS.ok : COLORS.customer
+    ctx.beginPath()
+    ctx.arc(px, py, 3.2, 0, Math.PI * 2)
+    ctx.fill()
+    if (c.state !== 'leave') {
+      ctx.strokeStyle = 'rgba(255,255,255,0.85)'
+      ctx.lineWidth = 1.5
+      ctx.beginPath()
+      ctx.arc(px, py, 5.6, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * clamp(c.patience / c.patienceMax, 0, 1))
+      ctx.stroke()
+    }
+  }
+  // alert markers (the virus' marker follows it around)
   const seen = new Set<string>()
   for (const a of w.alerts) {
     if (seen.has(a.targetId)) continue
@@ -1799,7 +2694,7 @@ export function drawMiniMap(ctx: Ctx, mw: number, mh: number, s: Scene) {
     const box = boxOf(w, a.targetId)
     if (!box) continue
     const cx = ox + box.fx * sc
-    const cy = oy + (box.base - 0.5) * sc
+    const cy = oy + (box.base - (a.type === 'virus' ? 0.25 : 0.5)) * sc
     const color = ALERT_COLOR[a.type]
     const R = clamp(sc * 0.75, 6.5, 9)
     const rr = R + (a.type !== 'upgrade' && blink ? 1 : 0)

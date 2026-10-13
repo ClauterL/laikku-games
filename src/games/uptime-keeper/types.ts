@@ -1,13 +1,18 @@
 /**
  * Uptime Keeper – shared types. Plain data only, no DOM or React.
  */
+import type { GlyphName } from './glyphs'
 
 export type Phase = 'start' | 'playing' | 'paused' | 'clear' | 'over'
 export type Layout = 'desktop' | 'portrait' | 'landscape'
 
 export type StationKind = 'crac' | 'pdu' | 'switch' | 'terminal'
 export type PipeKind = 'cooling' | 'power' | 'network'
-export type AlertType = 'heat' | 'fan' | 'psu' | 'net' | 'power' | 'upgrade' | 'down'
+/**
+ * `customer` – a visitor complains about one rack (performance fault on that rack);
+ * `infected` – a rack carries malware; `virus` – the roaming virus itself (target = virus id).
+ */
+export type AlertType = 'heat' | 'fan' | 'psu' | 'net' | 'power' | 'upgrade' | 'down' | 'customer' | 'infected' | 'virus'
 export type ActionKind = 'cool' | 'repair' | 'upgrade'
 export type UpgradeKind = 'cooling' | 'network' | 'server'
 export type Dir = 'up' | 'down' | 'left' | 'right'
@@ -75,6 +80,8 @@ export interface HallLayout {
   pipes: PipeDef[]
   start: Pt
   zones: string[]
+  /** Visitor entrance: a gap in the left wall at row `y` (none in the one-block hall). */
+  door: { y: number } | null
 }
 
 export interface LevelDef {
@@ -99,6 +106,12 @@ export interface LevelDef {
   ups: boolean
   tutorial: boolean
   endless: boolean
+  /** Customers walk in with complaints (level 6+). */
+  customers: boolean
+  /** Viruses that may roam the hall at the same time (0 before level 11). */
+  viruses: number
+  /** Virus walking speed in tiles per second. */
+  virusSpeed: number
 }
 
 export interface Rack {
@@ -139,6 +152,74 @@ export interface Rack {
   ledSeed: number
   /** Has the overheating alert for the current heat episode been raised? */
   heatAlerted: boolean
+  /** Performance fault a customer complains about: the rack counts as degraded until REPAIRed. */
+  perf: boolean
+  /** Malware on the rack: counts as down until it is cleaned. */
+  infected: boolean
+  /** Seconds until an infected rack passes the malware to a neighbour. */
+  spreadT: number
+  /** 0–1 while a virus sits next to the rack and is about to infect it (derived every tick). */
+  infecting: number
+}
+
+export type CustomerState = 'enter' | 'wait' | 'leave'
+/** upset – waiting with a complaint; calm – just talked to; happy / angry – leaving. */
+export type CustomerMood = 'upset' | 'calm' | 'happy' | 'angry'
+
+export interface Customer {
+  id: string
+  rackId: string
+  /** The complaint shown in the speech bubble, e.g. "Our API times out – Rack 05!". */
+  complaint: string
+  /** Seed for the outfit (suit, tie, hair, coffee cup or laptop). */
+  look: number
+  /** Feet position in tile units. */
+  x: number
+  y: number
+  dir: Dir
+  /** Remaining waypoints (tile units). */
+  path: Pt[]
+  state: CustomerState
+  mood: CustomerMood
+  /** Seconds since the mood last changed (bubble animations). */
+  moodT: number
+  patience: number
+  patienceMax: number
+  talked: boolean
+  /** Cell the customer waits on. */
+  spot: Pt
+  speed: number
+  walk: number
+  moving: boolean
+  age: number
+}
+
+/** spawn – materialising at a network port; seek – heading for a rack; dwell – infecting it; roam – wandering. */
+export type VirusMode = 'spawn' | 'seek' | 'dwell' | 'roam'
+
+export interface Virus {
+  id: string
+  x: number
+  y: number
+  path: Pt[]
+  mode: VirusMode
+  /** Rack it is heading for or infecting. */
+  rackId: string | null
+  /** Seconds spent next to the target rack. */
+  dwell: number
+  /** Seconds of wandering left before it hunts the next rack. */
+  roam: number
+  /** Seconds left of the spawn animation. */
+  spawnT: number
+  speed: number
+  vx: number
+  vy: number
+  age: number
+  /** Recent positions for the glitch trail (render only). */
+  trail: Pt[]
+  trailT: number
+  /** Switch it came out of. */
+  stationId: string
 }
 
 export interface Station {
@@ -174,7 +255,8 @@ export interface Alert {
 
 export interface Repair {
   targetId: string
-  kind: 'fan' | 'psu' | 'reboot' | 'switch' | 'pdu'
+  /** `clean` removes malware, `perf` fixes the performance fault a customer complains about. */
+  kind: 'fan' | 'psu' | 'reboot' | 'switch' | 'pdu' | 'clean' | 'perf'
   t: number
   duration: number
 }
@@ -192,6 +274,14 @@ export type SimEvent =
   | { kind: 'swap'; stationId: string }
   | { kind: 'credits'; amount: number; targetId: string; label: string }
   | { kind: 'breach'; reason: string }
+  | { kind: 'customerIn'; id: string; rackId: string; first: boolean }
+  | { kind: 'customerTalk'; id: string; added: number }
+  | { kind: 'customerHappy'; id: string; rackId: string; credits: number; bonus: number }
+  | { kind: 'customerAngry'; id: string; rackId: string; credits: number; sla: number }
+  | { kind: 'virusSpawn'; id: string; stationId: string; first: boolean }
+  /** `from` is the virus id (source 'virus') or the infected neighbour's rack id (source 'spread'). */
+  | { kind: 'infect'; rackId: string; source: 'virus' | 'spread'; from: string; first: boolean }
+  | { kind: 'quarantine'; id: string; x: number; y: number; credits: number }
 
 export interface Upgrades {
   cooling: number
@@ -245,11 +335,29 @@ export interface World {
   rng: () => number
   breached: string | null
   spawnsEnabled: boolean
+  customers: Customer[]
+  viruses: Virus[]
+  /** Running number for customer / virus ids. */
+  entitySeq: number
+  /** Time the next customer walks in. */
+  nextCustomer: number
+  /** Next complaint in the rotation. */
+  complaintIdx: number
+  /** Pending virus (re)spawn times. */
+  virusQueue: number[]
+  /** Customers / viruses that have appeared in this hall so far. */
+  visitors: number
+  virusSpawns: number
+  happy: number
+  escalations: number
+  quarantined: number
+  infections: number
+  cleaned: number
 }
 
 /* ---------- HUD view-models ---------- */
 
-export type Tone = 'cooling' | 'power' | 'network' | 'alert' | 'ok' | 'upgrade'
+export type Tone = 'cooling' | 'power' | 'network' | 'alert' | 'ok' | 'upgrade' | 'customer' | 'virus'
 
 export interface AlertView {
   id: number
@@ -261,6 +369,11 @@ export interface AlertView {
   chip: string
   severity: 'info' | 'warn' | 'critical'
   selected: boolean
+  glyph: GlyphName
+  /** 0–100 for a countdown bar under the row (customer patience, malware spread), −1 for none. */
+  meter: number
+  /** A customer who escalated – shown crossed out for a few seconds, not clickable. */
+  failed: boolean
 }
 
 export interface DetailView {
@@ -269,6 +382,8 @@ export interface DetailView {
   title: string
   lines: string[]
   bar: { pct: number; label: string; tone: Tone } | null
+  /** Overrides the icon of the detail card. */
+  glyph?: GlyphName
 }
 
 export interface ActionView {
@@ -277,6 +392,9 @@ export interface ActionView {
   sub: string
   /** Why it is disabled, or what it will do. */
   hint: string
+  /** Context label that replaces the button's own (TALK to a customer, ZAP a virus). */
+  label?: string
+  glyph?: GlyphName
 }
 
 export interface LevelClearView {
@@ -291,6 +409,9 @@ export interface LevelClearView {
   resolved: number
   shutdowns: number
   autoCools: number
+  happy: number
+  escalated: number
+  quarantined: number
   nextLevel: number
   nextTitle: string
   nextIntro: string
@@ -311,7 +432,7 @@ export interface Banner {
   id: number
   text: string
   sub: string
-  tone: 'alert' | 'ok' | 'power'
+  tone: 'alert' | 'ok' | 'power' | 'customer' | 'virus'
 }
 
 export interface HudState {

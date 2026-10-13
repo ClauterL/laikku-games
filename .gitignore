@@ -23,6 +23,9 @@ dist-ssr
 *.sln
 *.sw?
 
+# Netlify CLI local state (netlify dev's Blobs sandbox, function builds)
+.netlify/
+
 # screenshots produced by scripts/shoot.mjs
 shots/
 .vite/

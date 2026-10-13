@@ -9,7 +9,7 @@ import { sfx } from '../../shared/sfx'
 import { useEngine } from '../../shared/useEngine'
 import { Engine, SLUG, initialHud } from './engine'
 import { CubeMark, Glyph } from './Glyph'
-import { ACTION_GLYPH, ALERT_GLYPH, type GlyphName } from './glyphs'
+import { ACTION_GLYPH, type GlyphName } from './glyphs'
 import { SLA_PASS } from './levels'
 import type { ActionKind, DetailView, HudState, Phase, Tone } from './types'
 import './uptime-keeper.css'
@@ -28,6 +28,9 @@ const DETAIL_GLYPH: Record<DetailView['type'], GlyphName> = {
   power: 'bolt',
   down: 'cross',
   upgrade: 'chevrons',
+  customer: 'person',
+  infected: 'skull',
+  virus: 'bug',
   rack: 'power',
   crac: 'snow',
   pdu: 'bolt',
@@ -165,8 +168,16 @@ export default function UptimeKeeper() {
   const d = hud.detail
   const clear = hud.clear
   const over = hud.over
-  const openAlerts = hud.alerts.filter((a) => a.type !== 'upgrade').length
+  const openAlerts = hud.alerts.filter((a) => a.type !== 'upgrade' && !a.failed).length
   const playing = phase === 'playing'
+  // the third stat of the level-clear card follows what the hall threw at the player
+  const clearStat = !clear
+    ? null
+    : clear.quarantined > 0
+      ? { label: 'Quarantined', value: clear.quarantined }
+      : clear.happy + clear.escalated > 0
+        ? { label: 'Happy customers', value: `${clear.happy}/${clear.happy + clear.escalated}` }
+        : { label: clear.autoCools > 0 ? 'Auto-cooled' : 'Credits', value: clear.autoCools > 0 ? clear.autoCools : clear.credits }
 
   return (
     <div
@@ -258,22 +269,32 @@ export default function UptimeKeeper() {
               <li key={a.id}>
                 <button
                   type="button"
-                  className={`uk-obj type-${a.type} is-${a.severity}${a.selected ? ' is-selected' : ''}`}
-                  data-alert={a.type}
+                  className={`uk-obj type-${a.type} is-${a.severity}${a.selected ? ' is-selected' : ''}${a.failed ? ' is-failed' : ''}${a.meter >= 0 ? ' has-meter' : ''}`}
+                  data-alert={a.failed ? 'failed' : a.type}
                   data-target={a.targetId}
-                  onClick={pickAlert(a.id)}
+                  disabled={a.failed}
+                  onClick={a.failed ? undefined : pickAlert(a.id)}
                 >
                   <span className="uk-obj__icon">
-                    <Glyph name={ALERT_GLYPH[a.type]} size={24} />
+                    <Glyph name={a.glyph} size={24} />
                   </span>
                   <span className="uk-obj__text">
                     <b>{a.title}</b>
                     <small>{a.subtitle}</small>
                     <em>{a.chip}</em>
                   </span>
-                  <span className="uk-obj__chev" aria-hidden="true">
-                    ›
-                  </span>
+                  {a.failed ? (
+                    <span className="uk-obj__tag">Failed</span>
+                  ) : (
+                    <span className="uk-obj__chev" aria-hidden="true">
+                      ›
+                    </span>
+                  )}
+                  {a.meter >= 0 && (
+                    <span className="uk-obj__meter" aria-hidden="true">
+                      <i style={{ width: `${a.meter}%` }} />
+                    </span>
+                  )}
                 </button>
               </li>
             ))}
@@ -295,21 +316,24 @@ export default function UptimeKeeper() {
         </section>
 
         <div className="uk-actions">
-          {ACTIONS.map(({ kind, label, key }) => {
+          {ACTIONS.map(({ kind, label: baseLabel, key }) => {
             const a = hud.actions[kind]
             const busy = kind === 'repair' && hud.repairPct >= 0
+            // REPAIR doubles as the context action next to a visitor (TALK) or the virus (ZAP)
+            const label = a.label ?? baseLabel
             return (
               <button
                 key={kind}
                 type="button"
-                className={`uk-act uk-act--${kind}${a.enabled ? '' : ' is-off'}${busy ? ' is-busy' : ''}`}
+                className={`uk-act uk-act--${kind}${a.enabled ? '' : ' is-off'}${busy ? ' is-busy' : ''}${a.label ? ` is-context ctx-${a.label.toLowerCase()}` : ''}`}
                 aria-disabled={!a.enabled}
                 aria-label={`${label} – ${a.hint}`}
                 title={a.hint}
                 data-action={kind}
+                data-label={label}
                 onClick={press(kind)}
               >
-                <Glyph name={ACTION_GLYPH[kind]} size={38} className="uk-act__glyph" />
+                <Glyph name={a.glyph ?? ACTION_GLYPH[kind]} size={38} className="uk-act__glyph" />
                 <span className="uk-act__label">{label}</span>
                 <span className="uk-act__sub">{a.sub}</span>
                 <span className="uk-act__key">{key}</span>
@@ -325,7 +349,7 @@ export default function UptimeKeeper() {
 
         <aside className={`uk-detail tone-${d.tone} type-${d.type}`} aria-live="polite">
           <div className="uk-detail__icon">
-            <Glyph name={DETAIL_GLYPH[d.type]} size={44} />
+            <Glyph name={d.glyph ?? DETAIL_GLYPH[d.type]} size={44} />
           </div>
           <div className="uk-detail__body">
             <h3>{d.title}</h3>
@@ -477,7 +501,7 @@ export default function UptimeKeeper() {
           stats={[
             { label: 'Score', value: formatScore(clear.score) },
             { label: 'Resolved', value: clear.resolved },
-            { label: clear.autoCools > 0 ? 'Auto-cooled' : 'Credits', value: clear.autoCools > 0 ? clear.autoCools : clear.credits },
+            clearStat!,
             { label: 'Shutdowns', value: clear.shutdowns },
           ]}
         >

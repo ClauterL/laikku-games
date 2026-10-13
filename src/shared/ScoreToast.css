@@ -1,0 +1,260 @@
+/* Leaderboard toast (ScoreToast.tsx) – fixed, top centre, above every game overlay. */
+.score-toast {
+  --accent: #2f80ff;
+  --accent-2: #ffd43b;
+  position: fixed;
+  z-index: 1000;
+  top: max(10px, env(safe-area-inset-top));
+  left: max(10px, env(safe-area-inset-left));
+  right: max(10px, env(safe-area-inset-right));
+  width: auto;
+  max-width: 460px;
+  margin: 0 auto;
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px 12px 12px 14px;
+  border-radius: 18px;
+  background: linear-gradient(160deg, rgba(18, 32, 72, 0.96), rgba(9, 17, 42, 0.96));
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  box-shadow:
+    0 18px 50px rgba(0, 0, 0, 0.5),
+    0 0 0 1px color-mix(in srgb, var(--accent) 35%, transparent),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  color: var(--text);
+  font-family: var(--font-ui);
+  text-align: left;
+  user-select: text;
+  -webkit-user-select: text;
+  touch-action: manipulation;
+  animation: score-toast-in 0.4s cubic-bezier(0.2, 1.3, 0.4, 1);
+}
+
+@keyframes score-toast-in {
+  from {
+    transform: translateY(-18px) scale(0.97);
+    opacity: 0;
+  }
+  to {
+    transform: none;
+    opacity: 1;
+  }
+}
+
+.score-toast__icon {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  border-radius: 13px;
+  background: linear-gradient(180deg, var(--accent), color-mix(in srgb, var(--accent) 60%, #000));
+  box-shadow: 0 4px 0 color-mix(in srgb, var(--accent) 40%, #000);
+  color: #fff;
+}
+
+.score-toast__icon svg {
+  width: 24px;
+  height: 24px;
+}
+
+.score-toast__icon--top1 {
+  background: linear-gradient(180deg, #ffe066, #f5a700);
+  box-shadow: 0 4px 0 #a86a00;
+  color: #3d2600;
+}
+
+.score-toast__icon--top2 {
+  background: linear-gradient(180deg, #f1f5ff, #aab6cc);
+  box-shadow: 0 4px 0 #6d7a92;
+  color: #26314a;
+}
+
+.score-toast__icon--top3 {
+  background: linear-gradient(180deg, #ffc78f, #d0773a);
+  box-shadow: 0 4px 0 #8a4416;
+  color: #3a1a04;
+}
+
+.score-toast__body {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+}
+
+.score-toast__title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 18px;
+  font-weight: 800;
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+}
+
+.score-toast__title b {
+  color: var(--accent-2);
+}
+
+.score-toast__sub {
+  margin: 3px 0 0;
+  color: var(--text-dim);
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.score-toast__sub b {
+  color: var(--text);
+  font-family: var(--font-display);
+  font-size: 15px;
+  font-weight: 800;
+}
+
+.score-toast__new {
+  color: #37e36b;
+  font-weight: 900;
+}
+
+.score-toast__side {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+  align-self: stretch;
+  justify-content: space-between;
+}
+
+.score-toast__link {
+  padding: 2px 2px;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 900;
+  text-decoration: none;
+  white-space: nowrap;
+  border-bottom: 2px solid color-mix(in srgb, var(--accent) 80%, #fff);
+}
+
+.score-toast__link:hover {
+  color: var(--accent-2);
+}
+
+.score-toast__close {
+  appearance: none;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  margin: -4px -4px 0 0;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+}
+
+.score-toast__close:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text);
+}
+
+.score-toast__close svg {
+  width: 16px;
+  height: 16px;
+}
+
+.score-toast__form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.score-toast__input {
+  flex: 1 1 150px;
+  min-width: 0;
+  height: 42px;
+  padding: 0 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text);
+  /* 16px keeps iOS Safari from zooming into the field */
+  font: 700 16px var(--font-ui);
+  outline: none;
+}
+
+.score-toast__input::placeholder {
+  color: rgba(244, 247, 255, 0.45);
+}
+
+.score-toast__input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 35%, transparent);
+}
+
+.score-toast__input[aria-invalid='true'] {
+  border-color: #ff6b6b;
+}
+
+.score-toast__btn {
+  appearance: none;
+  height: 42px;
+  padding: 0 16px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 12px;
+  background: transparent;
+  color: var(--text);
+  font: 800 16px var(--font-display);
+  cursor: pointer;
+}
+
+.score-toast__btn--primary {
+  border: 0;
+  background: linear-gradient(180deg, var(--accent), color-mix(in srgb, var(--accent) 65%, #000));
+  box-shadow: 0 3px 0 color-mix(in srgb, var(--accent) 40%, #000);
+  color: #fff;
+}
+
+.score-toast__btn:disabled {
+  opacity: 0.7;
+  cursor: progress;
+}
+
+.score-toast__btn:active:not(:disabled) {
+  transform: translateY(2px);
+}
+
+.score-toast__error {
+  margin: 8px 0 0;
+  color: #ff8f8f;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+@media (max-width: 400px) {
+  .score-toast {
+    gap: 10px;
+    padding: 10px 10px 12px 12px;
+  }
+  .score-toast__icon {
+    width: 36px;
+    height: 36px;
+  }
+  .score-toast__icon svg {
+    width: 20px;
+    height: 20px;
+  }
+  .score-toast__title {
+    font-size: 17px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .score-toast {
+    animation: none;
+  }
+}

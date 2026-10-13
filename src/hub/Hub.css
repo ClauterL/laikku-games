@@ -66,6 +66,82 @@
   line-height: 1.55;
 }
 
+/* ---------- live counters ---------- */
+.live-dot {
+  flex: none;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: rgba(244, 247, 255, 0.35);
+}
+
+.live-dot--on {
+  background: #37e36b;
+  animation: live-pulse 2s ease-out infinite;
+}
+
+@keyframes live-pulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(55, 227, 107, 0.6);
+  }
+  70%,
+  100% {
+    box-shadow: 0 0 0 8px rgba(55, 227, 107, 0);
+  }
+}
+
+.hub-live {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 4px 10px;
+  min-height: 42px;
+  margin: 22px 0 0;
+  padding: 8px 20px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.13);
+  color: var(--text-dim);
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.hub-live b {
+  color: #fff;
+  font-family: var(--font-display);
+  font-size: 18px;
+  line-height: 1;
+}
+
+.hub-live__sep {
+  opacity: 0.6;
+}
+
+.hub-live__link,
+.hub-live a {
+  color: #fff;
+  text-decoration: none;
+  border-bottom: 2px solid #2f80ff;
+}
+
+.hub-live__link:hover,
+.hub-live a:hover {
+  color: #ffd43b;
+}
+
+.hub-live--offline {
+  font-weight: 700;
+}
+
+.hub-live__skeleton {
+  display: block;
+  width: min(300px, 60vw);
+  height: 12px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.1);
+}
+
 .hub__grid {
   position: relative;
   display: grid;
@@ -118,6 +194,33 @@
   transform: scale(1.08) rotate(-3deg);
 }
 
+/* company pill + "● 2 playing · 41 played"; the row is as tall as the pill, so the
+   live line appearing never shifts the card layout */
+.hub-card__meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+}
+
+.hub-card__live {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  color: var(--text-dim);
+  font-size: 12px;
+  font-weight: 800;
+  white-space: nowrap;
+  animation: overlay-in 0.3s ease-out;
+}
+
+.hub-card__live b {
+  color: #fff;
+  font-weight: 900;
+}
+
 .hub-card__body {
   display: flex;
   flex: 1;
@@ -127,7 +230,7 @@
 }
 
 .hub-card__company {
-  align-self: flex-start;
+  flex: none;
   padding: 3px 10px;
   border-radius: 999px;
   background: var(--accent);
@@ -199,5 +302,24 @@
   }
   .hub-card__art {
     height: 140px;
+  }
+  .hub-live {
+    gap: 2px 8px;
+    padding: 8px 16px;
+    border-radius: 20px;
+    font-size: 13px;
+  }
+  .hub-live b {
+    font-size: 16px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .live-dot--on {
+    animation: none;
+    box-shadow: 0 0 0 3px rgba(55, 227, 107, 0.25);
+  }
+  .hub-card__live {
+    animation: none;
   }
 }

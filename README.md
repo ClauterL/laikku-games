@@ -15,7 +15,7 @@ työpöydällä että puhelimella.
 | 6 | **Uptime Keeper** | Ficolo | Overcooked-tyylinen ylhäältä kuvattu arcade | `#/uptime-keeper` |
 
 Kuvakaappauksia: [`docs/screenshots/`](docs/screenshots/). Alkuperäiset konseptikuvat: [`docs/mockups/`](docs/mockups/).
-Repo: [github.com/ClauterL/laikku-games](https://github.com/ClauterL/laikku-games) · Live: [clauterl.github.io/laikku-games](https://clauterl.github.io/laikku-games/)
+Repo: [github.com/ClauterL/laikku-games](https://github.com/ClauterL/laikku-games) · Live: [havaida-games.netlify.app](https://havaida-games.netlify.app)
 
 ## Käyttöönotto
 
@@ -24,34 +24,44 @@ npm install        # kerran
 npm run dev        # http://localhost:5173  (hub + kaikki pelit)
 npm run build      # tuotantoversio kansioon dist/
 npm run preview    # dist/-version esikatselu
-npm run check      # TypeScript-tyypitys (tsc --noEmit)
+npm run check      # TypeScript-tyypitys (tsc --noEmit: sovellus + Netlify-funktiot)
+npx netlify dev    # http://localhost:8888 – sama + online-API ja paikallinen Blobs-hiekkalaatikko
 ```
 
 `dist/`-kansio on itsenäinen staattinen sivusto (`base: './'` + HashRouter), joten sen voi
 kopioida sellaisenaan mihin tahansa:
 
 - **laikku.com-alikansioon** (`laikku.com/games/`) – kopioi `dist/`-sisältö kansioon, ei muita muutoksia
-- **GitHub Pages** – mukana on valmis työnkulku `.github/workflows/deploy.yml`: jokainen push `main`-haaraan
-  buildaa pelit ja julkaisee ne osoitteeseen `https://clauterl.github.io/laikku-games/` (ensimmäinen ajo
-  kytkee Pagesin päälle automaattisesti; jos se ei onnistu, valitse repon asetuksista Settings → Pages →
-  Source: *GitHub Actions* ja aja työnkulku uudelleen)
-- **Netlify / Vercel / Cloudflare Pages** – build-komento `npm run build`, julkaisukansio `dist`
+- **Netlify** (nykyinen live-sivusto) – jatkuva julkaisu `main`-haarasta; `netlify.toml` määrittää buildin
+  (`npm run build` → `dist`), funktiot (`netlify/functions`) ja `assets/`-tiedostojen välimuistiotsakkeet
+- **GitHub Pages / alikansio** – `dist/` toimii sellaisenaan staattisena sivustona (online-kerros näkyy silloin offline-tilassa)
+- **Vercel / Cloudflare Pages** – build-komento `npm run build`, julkaisukansio `dist`
 
 Pelit eivät vaadi palvelinta: kaikki grafiikka piirretään canvasille, pisteet ja eteneminen
 tallentuvat selaimen localStorageen. Ainoa ulkoinen riippuvuus ajon aikana on Google Fonts
 (Baloo 2 + Nunito) – ilman verkkoa pelit käyttävät järjestelmäfontteja.
+
+**Online-kerros** (vain Netlifyssä, ks. [`docs/ONLINE.md`](docs/ONLINE.md)): yhteinen tulostaulukko,
+"pelaamassa nyt" -laskuri ja pelaajamäärät – Netlify Functions (`netlify/functions/*.mts`) + Netlify
+Blobs, jaettu koodi `netlify/lib/arcade.ts`. Muualla (`npm run dev`, GitHub Pages, alikansio) pelit
+toimivat kuten ennenkin ja hub näyttää hiljaisen offline-tilan. Moderointi: Netlifyn hallinnassa
+Data & Storage → Blobs → `arcade-scores` (tulostaulukon välimuisti rakentuu uudelleen minuutissa).
 
 ## Rakenne
 
 ```
 index.html                 fontit, meta, #root
 vite.config.ts             base './', matter-js esipaketoitu
+netlify.toml               Netlify: build, funktiot, välimuistiotsakkeet
+netlify/
+  functions/*.mts          online-API: presence, stats, leaderboard, score, name
+  lib/arcade.ts            yhteinen palvelinkoodi (validointi, Blobs-säilöt, rankingit)
 src/
   main.tsx                 React-juuri (StrictMode)
   App.tsx                  HashRouter – hub + 6 laiskasti ladattua pelireittiä
   games.ts                 pelien metatiedot (nimi, yritys, värit, ohjeteksti)
   index.css                yhteinen design system: fontit, overlayt, napit, HUD-chipit
-  hub/                     aloitussivu (pelikortit)
+  hub/                     aloitussivu (pelikortit, live-laskurit, tulostaulukko)
   shared/                  yhteiset moduulit (ks. alla)
   games/
     ticket-slash/          TicketSlash.tsx + engine.ts + render.ts + scene.ts + icons.ts + catalogue.ts
@@ -62,6 +72,7 @@ src/
     uptime-keeper/         UptimeKeeper.tsx + engine.ts + sim.ts (+ sim.check.ts) + render.ts + levels.ts + pathfind.ts
 scripts/
   shoot.mjs                Playwright-savutesti: käynnistää dev-palvelimen, ottaa kuvakaappaukset
+  api-smoke.mjs            online-API:n savutesti (puhtaat apufunktiot + kaikki endpointit, netlify dev)
   scenarios/<peli>.mjs     pelikohtaiset pelausskenaariot (ajavat peliä oikeilla syötteillä)
 docs/
   BRIEF.md                 kaikkien pelien yhteinen spesifikaatio ja laatulista
@@ -83,7 +94,9 @@ HUD:n ja overlayt (`useEngine`-hook luo/tuhoaa moottorin, StrictMode-turvallises
 | `canvas.ts` | DPR-skaalaus (`fitCanvas`), `observeResize`, `startLoop` (pysähtyy taustavälilehdellä) |
 | `draw.ts` | pyöristetyt laatikot, reunustettu teksti, hehku, partikkelit, leijuvat pistetekstit |
 | `sfx.ts` | WebAudio-syntetisaattori – kaikki äänet luodaan koodilla, ei äänitiedostoja |
-| `storage.ts` | localStorage-kääre (parhaat tulokset, eteneminen) |
+| `storage.ts` | localStorage-kääre (parhaat tulokset, eteneminen); `submitBest` lähettää myös `havaida:score`-tapahtuman |
+| `online.ts` | online-kerroksen asiakas: pelaaja-/istuntotunnus, heartbeat, tilastot, tulostaulukko- ja pistekutsut |
+| `PresenceTracker.tsx`, `ScoreToast.tsx` | heartbeat reitin mukaan; pisteilmoitus (nimen kysyminen, sijoitus) pelien päällä |
 | `rng.ts`, `math.ts` | siemennetty satunnaisgeneraattori (deterministiset tasot), easing-funktiot |
 
 ## Pelit lyhyesti
@@ -136,6 +149,7 @@ simulaation headless-testinä.
 npm run check                                   # tyypitys
 node scripts/shoot.mjs --route /ticket-slash --port 5181 --out shots/ticket-slash \
      --scenario scripts/scenarios/ticket-slash.mjs
+node scripts/api-smoke.mjs http://localhost:8888  # online-API (vaatii käynnissä olevan `npx netlify dev`)
 ```
 
 `shoot.mjs` käynnistää dev-palvelimen, avaa reitin 1280×800- ja 390×844-kokoisina, painaa PLAY,

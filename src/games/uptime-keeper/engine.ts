@@ -12,35 +12,46 @@ import { burst, updateFloatTexts, updateParticles, type FloatText, type Particle
 import { clamp, damp } from '../../shared/math'
 import { sfx, type SfxName } from '../../shared/sfx'
 import { getBest, loadJSON, saveJSON, submitBest } from '../../shared/storage'
+import { DroneFlight, drawDrone, overlaps, type DroneInput, type Rect } from './drone'
 import { COLORS } from './glyphs'
 import { actionViews, alertView, detailForAlert, detailForTarget, idleActions, nominalDetail } from './hudtext'
 import { SLA_FAIL, SLA_PASS, getLevel, levelIntro, levelTitle } from './levels'
 import { BODY_HX, BODY_HY, accessCell, blocked, clearLine, findPath, nearestWalkable, smoothPath } from './pathfind'
-import { boxOf, buildPipes, buildStatic, drawMiniMap, drawScene, miniMapTransform, type Fx, type PipeCache, type Scene, type StaticLayer, type StickView } from './render'
+import { TALK_BEAT, boxOf, buildPipes, buildStatic, drawMiniMap, drawScene, miniMapTransform, type Fx, type PipeCache, type Scene, type StaticLayer, type StickView } from './render'
 import {
+  ENTITY_REACH,
+  ESCALATION_SLA,
   MAX_UPGRADE,
+  TOUCH_DIST,
   WARN_TEMP,
   alertFor,
   anyCritical,
   canCool,
   cancelRepair,
+  catchVirus,
   cheapestUpgrade,
   createWorld,
+  customerById,
   doCool,
   doUpgrade,
   freshCarry,
+  infectRack,
   levelDone,
   powerRatio,
   repairKindFor,
+  spawnCustomer,
   spawnFault,
+  spawnVirus,
   starsFor,
   startRepair,
   stepWorld,
+  talkTo,
   targetName,
   upgradeFor,
   uptimeOf,
+  virusById,
 } from './sim'
-import type { ActionKind, Alert, AlertType, Banner, Carry, Dir, HudState, Layout, Phase, Pt, SimEvent, World } from './types'
+import type { ActionKind, Alert, AlertType, AlertView, Banner, Carry, Dir, HudState, Layout, Phase, Pt, SimEvent, World } from './types'
 
 export const SLUG = 'uptime-keeper'
 const SAVE_KEY = `${SLUG}:save`
@@ -136,8 +147,13 @@ interface HookApi {
   state: () => unknown
   moveTo: (targetId: string) => boolean
   act: (action: ActionKind | 'smart') => boolean
+  /** Also 'customer' (optional rack id), 'virus' (optional switch id) and 'infected' (rack id). */
   spawn: (type: AlertType, targetId?: string, value?: number) => boolean
   setLevel: (n: number) => void
+  /** Sets a waiting customer's patience in seconds (to stage an escalation). */
+  patience: (customerId: string, seconds: number) => boolean
+  /** Drone state; `flyby: true` starts a pass along the hall's top edge right away. */
+  drone: (opts?: { flyby?: boolean }) => unknown
   /** Screen position of a target's front face (for taps in the scenario). */
   screenPos: (targetId: string) => Pt | null
   /** Fast-forwards the simulation. */
@@ -155,6 +171,10 @@ declare global {
 }
 
 const rand = (a: number, b: number) => a + Math.random() * (b - a)
+
+/** Non-breaking spaces so "Rack 12", "3 s" or "40 credits" never split across two lines of HUD text. */
+const keepTogether = (text: string) =>
+  text.replace(/\b(Rack|Switch|PDU|CRAC|Lv) (\d+)/g, '$1 $2').replace(/(\d) (s|°C|%|cr|credits|racks)\b/g, '$1 $2')
 
 export class Engine {
   private canvas: HTMLCanvasElement
@@ -218,11 +238,28 @@ export class Engine {
   private bannerSeq = 0
   private hint: string | null = null
   private hintT = 0
+  /** A one-off explanation (first customer / first virus of a hall). */
+  private notice: string | null = null
+  private noticeT = 0
+  /** The technician's speech bubble after TALK. */
+  private techSay: { text: string; t: number } | null = null
+  /** Escalated customers stay in OBJECTIVES, crossed out, for a few seconds. */
+  private failed: { view: AlertView; t: number }[] = []
+  private failSeq = 0
+  /** Re-route timer while walking after a customer or the virus (they move), and where they were. */
+  private chaseT = 0
+  private chaseAt = { x: 0, y: 0 }
   private clear: HudState['clear'] = null
   private over: HudState['over'] = null
   private hudT = 0
   private hudForce = true
   private hudSig = ''
+
+  private drone: DroneFlight
+  private droneT = 0
+  private hudRects: Rect[] = []
+  private hudRectSig = ''
+  private drawDroneFn = (ctx: CanvasRenderingContext2D) => drawDrone(ctx, this.drone, this.dpr)
 
   private scene: Scene
 
@@ -262,7 +299,23 @@ export class Engine {
       scrolling: false,
       stick: null,
       live: false,
+      techSay: null,
+      drone: null,
     }
+    const measureCtx = ctx
+    this.drone = new DroneFlight((text, font) => {
+      measureCtx.save()
+      measureCtx.font = font
+      const w = measureCtx.measureText(text).width
+      measureCtx.restore()
+      return w
+    })
+    // banner text is measured in "Baloo 2" – redo it once the web font has arrived
+    document.fonts?.ready.then(() => {
+      if (this.destroyed) return
+      this.drone.resetMetrics()
+      this.droneT = 0
+    })
 
     this.disposers.push(observeResize(canvas, () => this.resize()))
     this.disposers.push(
@@ -390,8 +443,15 @@ export class Engine {
     this.pathGoal = null
     if (kind === 'cool') doCool(w, id)
     else if (kind === 'repair') {
-      if (!startRepair(w, id)) return false
-      this.playSound('click', 0)
+      // next to a visitor REPAIR means TALK, next to the virus it means ZAP
+      if (customerById(w, id)) {
+        if (!talkTo(w, id)) return false
+      } else if (virusById(w, id)) {
+        if (!catchVirus(w, id)) return false
+      } else {
+        if (!startRepair(w, id)) return false
+        this.playSound('click', 0)
+      }
     } else if (!doUpgrade(w, id)) return false
     this.actKind = kind
     this.actTimer = 0.5
@@ -407,6 +467,7 @@ export class Engine {
       this.deny(this.touch ? 'Tap a rack to walk there first' : 'Stand next to a rack or a unit first')
       return false
     }
+    if (customerById(w, id) || virusById(w, id)) return this.act('repair')
     if (repairKindFor(w, id).kind) return this.act('repair')
     const r = w.rackById.get(id)
     const cool = canCool(w, id).ok
@@ -438,6 +499,9 @@ export class Engine {
     this.floats.length = 0
     this.banner = null
     this.hint = null
+    this.notice = null
+    this.techSay = null
+    this.failed.length = 0
     this.clear = null
     this.over = null
     this.shake = 0
@@ -498,6 +562,9 @@ export class Engine {
       resolved: w.resolved,
       shutdowns: w.shutdowns,
       autoCools: w.autoCools,
+      happy: w.happy,
+      escalated: w.escalations,
+      quarantined: w.quarantined,
       nextLevel: next,
       nextTitle: levelTitle(next),
       nextIntro: levelIntro(next),
@@ -581,6 +648,62 @@ export class Engine {
       this.stick.y = this.H - safe.b - 14 - this.stick.r
     }
     this.camSnap = true
+    // the HUD re-lays itself out after React has rendered the new layout: re-measure shortly
+    this.drone.layoutChanged()
+    this.droneT = Math.min(this.droneT, 0.15)
+  }
+
+  /**
+   * Screen rectangles of the HTML HUD panels (canvas coordinates, with a little margin).
+   * Returns true when they changed since the last measurement.
+   */
+  private measureHud(): boolean {
+    const root = this.canvas.parentElement
+    const out: Rect[] = []
+    if (root) {
+      const base = this.canvas.getBoundingClientRect()
+      root.querySelectorAll<HTMLElement>('.uk-top, .uk-meters, .uk-objectives, .uk-map, .uk-actions, .uk-detail, .home-btn').forEach((el) => {
+        const r = el.getBoundingClientRect()
+        if (r.width < 2 || r.height < 2) return
+        let h = r.height
+        // the objectives list grows with the alerts – keep its whole column clear (down to the
+        // bottom HUD band) so the drone does not have to flee every time an alert comes in
+        if (el.classList.contains('uk-objectives') && this.layout !== 'portrait') h = Math.max(h, this.H - this.safe.b - (r.top - base.top))
+        out.push({ x: r.left - base.left - 8, y: r.top - base.top - 8, w: r.width + 16, h: h + 16 })
+      })
+    }
+    this.hudRects = out
+    const sig = out.map((r) => `${Math.round(r.x)},${Math.round(r.y)},${Math.round(r.w)},${Math.round(r.h)}`).join(';')
+    const changed = sig !== this.hudRectSig
+    this.hudRectSig = sig
+    return changed
+  }
+
+  /** What the drone has to keep clear of right now: HUD, joystick, and the hall with its shell. */
+  private droneInput(): DroneInput {
+    const T = this.T
+    const hall = this.world.hall
+    const pad = T * 0.62
+    const hud = this.hudRects.slice()
+    if (this.stickVisible()) {
+      const r = this.stick.r * 1.5
+      hud.push({ x: this.stick.x - r, y: this.stick.y - r, w: r * 2, h: r * 2 })
+    }
+    const top = this.safe.t - 6
+    const bottom = this.H - this.safe.b + 6
+    const hallTop = -this.cam.y
+    // the entrance walk outside the left wall (and the visitors on it) belongs to the hall too
+    const walk = hall.door ? T * 0.6 : 0
+    return {
+      W: this.W,
+      H: this.H,
+      bounds: { x: 4, y: top, w: this.W - 8, h: bottom - top },
+      hud,
+      hall: { x: -this.cam.x - pad - walk, y: hallTop - pad, w: hall.cols * T + pad * 2 + walk, h: hall.rows * T + pad * 2 },
+      hallTop,
+      tile: T,
+      hallTopVisible: hallTop > this.safe.t - T * 0.3 && hallTop < this.safe.t + T * 2,
+    }
   }
 
   private updateCamera(dt: number) {
@@ -714,7 +837,14 @@ export class Engine {
     }
     for (const r of w.racks) consider(r.id)
     for (const s of w.stations) consider(s.id)
+    for (const c of w.customers) if (c.state !== 'leave') consider(c.id)
+    for (const v of w.viruses) consider(v.id)
     return best
+  }
+
+  /** Feet position of a customer or virus, null for racks and units. */
+  private entityPos(id: string): Pt | null {
+    return customerById(this.world, id) ?? virusById(this.world, id) ?? null
   }
 
   /** Tap / click / map tap at a point in tile space. */
@@ -759,10 +889,50 @@ export class Engine {
     this.stuck = 0
   }
 
-  /** Walks next to a rack or unit (A* to the best free cell beside it). */
+  /** Walks next to a rack or unit (A* to the best free cell beside it), or after a customer / the virus. */
   walkTo(id: string): boolean {
     const w = this.world
     const hall = w.hall
+    const ent = this.entityPos(id)
+    if (ent) {
+      // walking up to somebody on purpose makes them the target (TALK / ZAP), like a tap does
+      this.selectedId = id
+      this.hudForce = true
+      if (Math.hypot(ent.x - this.player.x, ent.y - this.player.y) <= ENTITY_REACH * 0.55) {
+        this.path.length = 0
+        this.pathGoal = null
+        this.face(id)
+        return true
+      }
+      // the virus has to be touched; a visitor is approached from the side so both stay visible
+      const from = { x: Math.floor(this.player.x), y: Math.floor(this.player.y) }
+      const spots = virusById(w, id)
+        ? [ent]
+        : [
+            { x: ent.x - 0.8, y: ent.y },
+            { x: ent.x + 0.8, y: ent.y },
+            { x: ent.x, y: ent.y + 0.75 },
+            { x: ent.x, y: ent.y - 0.75 },
+            ent,
+          ].sort((a, b) => Math.hypot(a.x - this.player.x, a.y - this.player.y) - Math.hypot(b.x - this.player.x, b.y - this.player.y))
+      for (const spot of spots) {
+        const goal = nearestWalkable(hall, clamp(Math.floor(spot.x), 0, hall.cols - 1), clamp(Math.floor(spot.y), 0, hall.rows - 1))
+        const cells = goal && findPath(hall, from, goal)
+        if (!cells) continue
+        const pts = smoothPath(hall, this.player, cells)
+        // finish on the exact spot when it is standable
+        if (!blocked(hall, spot.x, spot.y) && (pts.length < 2 || clearLine(hall, pts[pts.length - 2], spot))) {
+          if (pts.length) pts[pts.length - 1] = { x: spot.x, y: spot.y }
+          else pts.push({ x: spot.x, y: spot.y })
+        } else if (spot !== ent && Math.hypot((goal.x + 0.5) - ent.x, (goal.y + 0.5) - ent.y) > ENTITY_REACH) continue
+        this.setPath(pts, id)
+        this.chaseAt.x = ent.x
+        this.chaseAt.y = ent.y
+        this.chaseT = 0.3
+        return true
+      }
+      return false
+    }
     const r = w.rackById.get(id)
     const s = w.stationById.get(id)
     const foot = r ? { cx: r.cx, cy: r.cy, w: 1, h: 1 } : s
@@ -848,6 +1018,25 @@ export class Engine {
       vy = (iy / d) * speed
       this.tryMove(vx * dt, vy * dt)
     } else if (this.path.length) {
+      const goal = this.pathGoal
+      const chased = goal ? this.entityPos(goal) : null
+      if (goal && chased) {
+        // after a visitor or the virus: stop once in reach (the virus has to be touched),
+        // and re-route every few frames when the target has moved away from where it was
+        const reach = virusById(this.world, goal) ? 0 : ENTITY_REACH * 0.8
+        if (Math.hypot(chased.x - p.x, chased.y - p.y) <= reach) {
+          this.path.length = 0
+          this.pathGoal = null
+          this.face(goal)
+          return
+        }
+        this.chaseT -= dt
+        if (this.chaseT <= 0 && Math.hypot(this.chaseAt.x - chased.x, this.chaseAt.y - chased.y) > 0.4) {
+          this.chaseT = 0.3
+          this.walkTo(goal)
+          if (!this.path.length) return
+        }
+      }
       const wp = this.path[0]
       const dx = wp.x - p.x
       const dy = wp.y - p.y
@@ -900,6 +1089,27 @@ export class Engine {
     }
     for (const r of w.racks) consider(r.id, { cx: r.cx, cy: r.cy, w: 1, h: 1 })
     for (const s of w.stations) consider(s.id, s)
+    // a visitor (TALK) or the virus (ZAP) in reach; racks with work to do win unless the player walked up on purpose
+    const p = this.player
+    for (const c of w.customers) {
+      if (c.state === 'leave') continue
+      const d = Math.hypot(c.x - p.x, c.y - p.y)
+      if (d > ENTITY_REACH) continue
+      const score = d - 0.2 + (c.talked ? 0.5 : 0) - (c.id === this.selectedId ? 0.5 : 0) - (c.id === this.targetId ? 0.05 : 0)
+      if (score < bestScore) {
+        bestScore = score
+        best = c.id
+      }
+    }
+    for (const v of w.viruses) {
+      const d = Math.hypot(v.x - p.x, v.y - p.y)
+      if (d > ENTITY_REACH) continue
+      const score = d - 0.6 - (v.id === this.selectedId ? 0.5 : 0)
+      if (score < bestScore) {
+        bestScore = score
+        best = v.id
+      }
+    }
     if (best !== this.targetId) {
       this.targetId = best
       this.hudForce = true
@@ -953,6 +1163,14 @@ export class Engine {
     if (this.floats.length > 24) this.floats.shift()
   }
 
+  /** Floating text at a visitor's feet, so it never collides with their speech bubble. */
+  private footFloat(id: string, text: string, color: string, size = 15) {
+    const c = customerById(this.world, id)
+    if (!c) return
+    this.floats.push({ x: c.x * this.T, y: (c.y + 0.35) * this.T, text, color, life: 1.4, maxLife: 1.4, size })
+    if (this.floats.length > 24) this.floats.shift()
+  }
+
   private pushFx(f: Fx) {
     if (this.fx.length > 240) this.fx.shift()
     this.fx.push(f)
@@ -986,6 +1204,25 @@ export class Engine {
       this.pushFx({ kind: 'chev', x: (b.fx + rand(-0.4, 0.4)) * T, y: (b.fy + 0.4 + i * 0.12) * T, vx: 0, vy: -T * rand(1.4, 2.2), life, max: life, size: T * rand(0.1, 0.16), color })
     }
     this.pushFx({ kind: 'ring', x: b.fx * T, y: b.fy * T, vx: 0, vy: 0, life: 0.55, max: 0.55, size: T * 0.3, color })
+  }
+
+  /** Square glitch pixels flying off a target (malware, virus spawn). */
+  private pixels(id: string, count: number, colors: string[]) {
+    const b = boxOf(this.world, id)
+    if (!b) return
+    const T = this.T
+    for (let i = 0; i < count; i++) {
+      const life = rand(0.35, 0.8)
+      const a = Math.random() * Math.PI * 2
+      const sp = T * rand(0.8, 2.6)
+      this.pushFx({ kind: 'pixel', x: (b.fx + rand(-0.3, 0.3)) * T, y: (b.fy + rand(-0.3, 0.3)) * T, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp - T * 0.6, life, max: life, size: T * rand(0.05, 0.11), color: colors[i % colors.length] })
+    }
+  }
+
+  private showNotice(text: string, seconds = 7.5) {
+    this.notice = text
+    this.noticeT = seconds
+    this.hudForce = true
   }
 
   private smoke(id: string, count: number) {
@@ -1050,10 +1287,112 @@ export class Engine {
         }
         break
       case 'repairDone':
-        this.sparks(e.targetId, 14, ['#ffd23f', '#ffffff', '#ffb020'])
-        this.float(e.targetId, e.repairKind === 'reboot' ? 'REBOOTED' : 'FIXED', '#b9ffcf', 17)
+        if (e.repairKind === 'clean') {
+          this.pixels(e.targetId, 18, [COLORS.virus, '#ffffff', COLORS.toxic])
+          this.float(e.targetId, 'CLEAN', '#e2b8ff', 17)
+        } else {
+          this.sparks(e.targetId, 14, ['#ffd23f', '#ffffff', '#ffb020'])
+          this.float(e.targetId, e.repairKind === 'reboot' ? 'REBOOTED' : e.repairKind === 'perf' ? 'FAST AGAIN' : 'FIXED', '#b9ffcf', 17)
+        }
         this.playSound('repair', 0)
         break
+      case 'customerIn': {
+        this.playSound('pop', 0.3)
+        if (e.first) {
+          const name = targetName(w, e.rackId)
+          this.showNotice(
+            this.touch
+              ? `A customer is upset about ${name}. REPAIR it before their patience runs out – or tap them and TALK for +15\u00a0s.`
+              : `A customer is upset about ${name}. REPAIR it before their patience runs out – or walk up and TALK [2] for +15\u00a0s.`,
+          )
+        }
+        break
+      }
+      case 'customerTalk': {
+        this.techSay = { text: "We're on it!", t: 0 }
+        // the extra patience pops up at the visitor's feet, clear of the speech bubbles
+        this.footFloat(e.id, `+${e.added} s patience`, '#ffc2e8')
+        this.playSound('connect', 0)
+        break
+      }
+      case 'customerHappy':
+        this.footFloat(e.id, `+${e.credits} CR`, '#b9ffcf', 17)
+        this.chevrons(e.rackId, COLORS.ok)
+        this.showBanner('HAPPY CUSTOMER', `+${e.credits} credits · +${e.bonus} score – ${targetName(w, e.rackId)} is fast again`, 'ok')
+        this.playSound('coin', 0)
+        if (this.selectedId === e.id) this.selectedId = null
+        break
+      case 'customerAngry': {
+        const name = targetName(w, e.rackId)
+        this.footFloat(e.id, e.credits > 0 ? `−${e.credits} CR` : 'ESCALATED', '#ff8a92', 17)
+        this.showBanner('CUSTOMER ESCALATED', `SLA credit −${e.sla.toFixed(2)} %${e.credits > 0 ? ` · −${e.credits} credits` : ''} – nobody fixed ${name}`, 'alert')
+        this.failed.push({
+          t: 4.5,
+          view: {
+            id: -++this.failSeq,
+            type: 'customer',
+            targetId: e.rackId,
+            title: 'Customer escalated',
+            subtitle: `${name} · SLA credit −${ESCALATION_SLA.toFixed(2)} %`,
+            chip: 'Escalated',
+            severity: 'critical',
+            selected: false,
+            glyph: 'person',
+            meter: -1,
+            failed: true,
+          },
+        })
+        this.shake = Math.max(this.shake, 6)
+        this.playSound('bad', 0)
+        if (this.selectedId === e.id) this.selectedId = null
+        break
+      }
+      case 'virusSpawn': {
+        this.pixels(e.stationId, 22, [COLORS.virus, COLORS.toxic, '#ff5ec8'])
+        const b = boxOf(w, e.stationId)
+        if (b) this.pushFx({ kind: 'ring', x: b.fx * this.T, y: b.fy * this.T, vx: 0, vy: 0, life: 0.6, max: 0.6, size: this.T * 0.35, color: COLORS.virus })
+        this.playSound('alarm', 0.3)
+        if (e.first) {
+          this.showBanner('VIRUS DETECTED', 'It crawled out of a network port – catch it before it infects the racks', 'virus')
+          this.showNotice(this.touch ? 'Run into the virus to quarantine it – tap it to chase it.' : 'Run into the virus to quarantine it, or press ZAP [2] next to it.')
+        }
+        break
+      }
+      case 'infect': {
+        this.pixels(e.rackId, 16, [COLORS.virus, COLORS.toxic])
+        if (e.source === 'spread') {
+          const a = boxOf(w, e.from)
+          const b = boxOf(w, e.rackId)
+          if (a && b) {
+            const T = this.T
+            for (let i = 0; i < 2; i++) this.pushFx({ kind: 'arc', x: a.fx * T, y: a.fy * T, vx: 0, vy: 0, x2: b.fx * T, y2: b.fy * T, life: 0.55, max: 0.55, size: Math.max(1.5, T * 0.04), color: i ? COLORS.toxic : '#c77dff' })
+          }
+        }
+        this.float(e.rackId, 'INFECTED', '#e2b8ff', 16)
+        this.playSound('hit', 0.2)
+        if (e.first) this.showNotice(`${targetName(w, e.rackId)} is infected: it counts as down and spreads every 12\u00a0s. REPAIR${this.touch ? '' : ' [2]'} it to clean the malware (4\u00a0s).`)
+        break
+      }
+      case 'quarantine': {
+        const T = this.T
+        const x = e.x * T
+        const y = (e.y - 0.28) * T
+        this.pushFx({ kind: 'ring', x, y, vx: 0, vy: 0, life: 0.5, max: 0.5, size: T * 0.3, color: '#ffffff' })
+        this.pushFx({ kind: 'ring', x, y, vx: 0, vy: 0, life: 0.75, max: 0.75, size: T * 0.45, color: COLORS.virus })
+        for (let i = 0; i < 6; i++) {
+          const a = (i / 6) * Math.PI * 2 + Math.random()
+          const r = T * rand(0.6, 1.1)
+          this.pushFx({ kind: 'arc', x, y, vx: 0, vy: 0, x2: x + Math.cos(a) * r, y2: y + Math.sin(a) * r, life: 0.35, max: 0.35, size: Math.max(1.5, T * 0.035), color: i % 2 ? COLORS.cooling : '#ffffff' })
+        }
+        if (this.particles.length > 160) this.particles.splice(0, this.particles.length - 160)
+        burst(this.particles, x, y, 18, [COLORS.virus, COLORS.toxic, '#ffffff'], { speed: T * 3.6, life: 0.5, size: T * 0.1, gravity: T * 4, shape: 'square' })
+        this.floats.push({ x, y: y - T * 0.5, text: `+${e.credits} QUARANTINED`, color: '#e2b8ff', life: 1.4, maxLife: 1.4, size: 17 })
+        this.showBanner('VIRUS QUARANTINED', `+${e.credits} credits – the next one may come through a network port in about a minute`, 'virus')
+        this.shake = Math.max(this.shake, 5)
+        this.playSound('combo', 0)
+        if (this.selectedId === e.id) this.selectedId = null
+        break
+      }
       case 'swap':
         this.sparks(e.stationId, 12, ['#39ff7a', '#ffffff'])
         this.float(e.stationId, 'SPARE SWAPPED', '#b9ffcf', 17)
@@ -1096,10 +1435,18 @@ export class Engine {
         this.pushFx({ kind: 'mist', x: (s.cx + 0.5 + dir * 0.5) * T, y: (s.cy + rand(1.2, 1.9)) * T, vx: dir * T * rand(0.5, 1.1), vy: -T * rand(0.05, 0.3), life, max: life, size: T * rand(0.06, 0.12), color: '#bfeaff' })
       }
       for (const r of w.racks) {
-        if (r.down && Math.random() < 0.4) this.smoke(r.id, 1)
+        if (r.infected && Math.random() < 0.35) this.pixels(r.id, 1, [COLORS.virus, COLORS.toxic])
+        else if (r.down && Math.random() < 0.4) this.smoke(r.id, 1)
         else if (r.boost > 0 && Math.random() < 0.5) {
           const life = rand(0.5, 0.9)
           this.pushFx({ kind: 'mist', x: (r.cx + rand(0.1, 0.9)) * T, y: (r.cy + rand(0, 0.9)) * T, vx: rand(-8, 8), vy: -T * rand(0.3, 0.7), life, max: life, size: T * rand(0.05, 0.1), color: '#d7f3ff' })
+        }
+      }
+      // pixel noise shed by the roaming viruses
+      for (const v of w.viruses) {
+        for (let i = 0; i < 2; i++) {
+          const life = rand(0.3, 0.7)
+          this.pushFx({ kind: 'pixel', x: (v.x + rand(-0.3, 0.3)) * T, y: (v.y - 0.3 + rand(-0.25, 0.2)) * T, vx: rand(-14, 14), vy: -T * rand(0.2, 0.7), life, max: life, size: T * rand(0.04, 0.08), color: i ? COLORS.toxic : COLORS.virus })
         }
       }
     }
@@ -1122,6 +1469,12 @@ export class Engine {
     if (this.phase === 'playing') {
       this.updatePlayer(dt)
       stepWorld(this.world, dt)
+      // running into the virus quarantines it
+      const p = this.player
+      for (let i = this.world.viruses.length - 1; i >= 0; i--) {
+        const v = this.world.viruses[i]
+        if (Math.hypot(v.x - p.x, v.y - p.y) < TOUCH_DIST) catchVirus(this.world, v.id)
+      }
       this.updateTarget()
       const events = this.world.events
       if (events.length) {
@@ -1172,7 +1525,38 @@ export class Engine {
         this.hudForce = true
       }
     }
+    if (this.phase === 'playing') {
+      if (this.noticeT > 0) {
+        this.noticeT -= dt
+        if (this.noticeT <= 0) {
+          this.notice = null
+          this.hudForce = true
+        }
+      }
+      if (this.techSay) {
+        this.techSay.t += dt
+        if (this.techSay.t > TALK_BEAT + 0.1) this.techSay = null
+      }
+      for (let i = this.failed.length - 1; i >= 0; i--) {
+        this.failed[i].t -= dt
+        if (this.failed[i].t <= 0) {
+          this.failed.splice(i, 1)
+          this.hudForce = true
+        }
+      }
+    }
     this.updateCamera(dt)
+    // the banner drone pauses with the game; it re-plans twice a second, and at once when a HUD
+    // panel changes size (a taller detail card must not cover it)
+    if (this.phase !== 'paused') {
+      if (this.measureHud()) this.droneT = 0
+      this.droneT -= dt
+      if (this.droneT <= 0) {
+        this.droneT = 0.5
+        this.drone.replan(this.droneInput())
+      }
+      this.drone.update(dt, this.droneInput())
+    }
     this.hudT -= dt
     if (this.hudForce || this.hudT <= 0) {
       this.hudT = 0.2
@@ -1197,24 +1581,34 @@ export class Engine {
       return this.touch ? `A fan failed in ${name} – tap it, press REPAIR and stay until the ring is full.` : `A fan failed in ${name} – stand next to it and press REPAIR [2] until the ring is full.`
     }
     if (w.tutorialStep === 4) return `You are on your own now – keep UPTIME at 100 %. Spend credits with UPGRADE${this.touch ? '' : ' [3]'}.`
-    return null
+    return this.notice
   }
 
   private emitHud() {
     const w = this.world
     const uptime = uptimeOf(w)
     const alerts = w.alerts.map((a) => alertView(w, a, this.selectedId))
+    // escalated customers stay listed (crossed out) for a moment, under the open objectives
+    for (const f of this.failed) alerts.push(f.view)
     const live = this.phase === 'playing' || this.phase === 'paused'
-    // detail card: what is in reach, else the highlighted alert, else the most urgent one
-    const here = this.targetId ? alertFor(w, this.targetId) : undefined
-    const picked = this.selectedId ? alertFor(w, this.selectedId) : undefined
+    // detail card: what is in reach (a rack's alert, a visitor, the virus), else the highlighted
+    // alert or visitor, else the most urgent one
+    const isEntity = (id: string | null) => !!id && !!this.entityPos(id)
+    const here = this.targetId && !isEntity(this.targetId) ? alertFor(w, this.targetId) : undefined
+    const picked = this.selectedId && !isEntity(this.selectedId) ? alertFor(w, this.selectedId) : undefined
     const guided = this.tutorialAlert()
     const urgent = w.alerts.find((a) => a.type !== 'upgrade') ?? w.alerts[0]
-    const alert = here ?? picked ?? guided
-    let detail = alert ? detailForAlert(w, alert, this.touch) : null
+    let detail = here ? detailForAlert(w, here, this.touch) : null
+    if (!detail && this.targetId && isEntity(this.targetId)) detail = detailForTarget(w, this.targetId, this.touch)
+    if (!detail && (picked ?? guided)) detail = detailForAlert(w, (picked ?? guided)!, this.touch)
+    if (!detail && this.selectedId && isEntity(this.selectedId)) detail = detailForTarget(w, this.selectedId, this.touch)
     if (!detail && this.targetId) detail = detailForTarget(w, this.targetId, this.touch)
     if (!detail && urgent) detail = detailForAlert(w, urgent, this.touch)
     if (!detail) detail = nominalDetail(this.touch)
+    detail = { ...detail, lines: detail.lines.map(keepTogether) }
+    for (const a of alerts) a.subtitle = keepTogether(a.subtitle)
+    const tip = this.phase === 'playing' ? this.tipText() : null
+    const banner = live && this.banner ? { ...this.banner, sub: keepTogether(this.banner.sub) } : null
     const rep = w.repair
     const hud: HudState = {
       layout: this.layout,
@@ -1237,8 +1631,8 @@ export class Engine {
       actions: actionViews(w, live ? this.targetId : null),
       repairPct: rep ? Math.round((rep.t / rep.duration) * 20) * 5 : -1,
       spares: w.upgrades.spares,
-      banner: live ? this.banner : null,
-      tip: this.phase === 'playing' ? this.tipText() : null,
+      banner,
+      tip: tip && keepTogether(tip),
       critical: this.phase === 'playing' && anyCritical(w),
       upgrades: { cooling: w.upgrades.cooling, network: w.upgrades.network },
       clear: this.clear,
@@ -1287,6 +1681,8 @@ export class Engine {
     let stick: StickView | null = null
     if (this.stickVisible()) stick = this.stick
     s.stick = stick
+    s.techSay = live ? this.techSay : null
+    s.drone = this.drone.view.visible ? this.drawDroneFn : null
     drawScene(this.ctx, s)
 
     // the mini-map is tiny – a few redraws per second are plenty
@@ -1338,8 +1734,24 @@ export class Engine {
           tutorialStep: w.tutorialStep,
           camera: { x: this.cam.x, y: this.cam.y, tile: this.T, scrolling: this.scrolling },
           upgrades: { ...w.upgrades },
-          racks: w.racks.map((r) => ({ id: r.id, temp: Math.round(r.temp), down: r.down, level: r.serverLevel })),
+          racks: w.racks.map((r) => ({ id: r.id, temp: Math.round(r.temp), down: r.down, level: r.serverLevel, perf: r.perf, infected: r.infected })),
           stations: w.stations.map((s) => ({ id: s.id, kind: s.kind, fault: s.fault })),
+          customers: w.customers.map((c) => ({
+            id: c.id,
+            rackId: c.rackId,
+            complaint: c.complaint,
+            state: c.state,
+            mood: c.mood,
+            patience: Math.round(c.patience * 10) / 10,
+            talked: c.talked,
+            x: c.x,
+            y: c.y,
+          })),
+          viruses: w.viruses.map((v) => ({ id: v.id, mode: v.mode, rackId: v.rackId, x: v.x, y: v.y, dwell: v.dwell })),
+          infected: w.racks.filter((r) => r.infected).map((r) => r.id),
+          stats: { happy: w.happy, escalations: w.escalations, quarantined: w.quarantined, infections: w.infections, cleaned: w.cleaned },
+          hall: { cols: w.hall.cols, rows: w.hall.rows, door: w.hall.door },
+          drone: { mode: this.drone.mode, visible: this.drone.view.visible, x: this.drone.view.x, y: this.drone.view.y, format: this.drone.view.format, font: this.drone.view.fontSize },
         }
       },
       moveTo: (id) => this.phase === 'playing' && this.walkTo(id),
@@ -1347,6 +1759,17 @@ export class Engine {
       spawn: (type, targetId, value) => {
         if (this.phase !== 'playing') return false
         const w = this.world
+        if (type === 'customer') return spawnCustomer(w, targetId)
+        if (type === 'virus') {
+          // brings the next queued virus forward instead of adding one on top of it
+          const ok = spawnVirus(w, targetId)
+          if (ok && w.virusQueue.length) w.virusQueue.splice(w.virusQueue.indexOf(Math.min(...w.virusQueue)), 1)
+          return ok
+        }
+        if (type === 'infected') {
+          const r = targetId ? w.rackById.get(targetId) : w.racks.find((x) => !x.infected && !x.down)
+          return !!r && infectRack(w, r.id)
+        }
         if (type === 'upgrade') {
           // the objective appears by itself once the wallet covers the next upgrade
           const up = cheapestUpgrade(w)
@@ -1363,8 +1786,8 @@ export class Engine {
           return true
         }
         const ok = spawnFault(w, type, targetId)
-        if (ok && type === 'heat') {
-          // skip the silent warm-up so the alert shows at once
+        if (ok && type === 'heat' && value !== 0) {
+          // skip the silent warm-up so the alert shows at once (value 0 keeps the natural ramp from idle)
           const r = targetId ? w.rackById.get(targetId) : w.racks.find((x) => x.hotspotTarget > 0 && !alertFor(w, x.id))
           if (r) {
             r.hotspot = 1
@@ -1381,6 +1804,37 @@ export class Engine {
         this.world.spawnsEnabled = true
         this.world.nextSpawn = this.world.time + 6
         this.setPhase('playing')
+      },
+      patience: (id, seconds) => {
+        const c = customerById(this.world, id)
+        if (!c || c.state === 'leave') return false
+        c.patience = Math.max(0, seconds)
+        return true
+      },
+      drone: (opts) => {
+        if (opts?.flyby) {
+          this.measureHud()
+          return this.drone.forceFlyby(this.droneInput())
+        }
+        const v = this.drone.view
+        // live overlap check against the HUD panels (measured now) and the hall's screen box
+        this.measureHud()
+        const input = this.droneInput()
+        const box = this.drone.bbox()
+        const onScreen = box.x < this.W && box.x + box.w > 0 && box.y < this.H && box.y + box.h > 0
+        return {
+          mode: this.drone.mode,
+          visible: v.visible,
+          x: v.x,
+          y: v.y,
+          format: v.format,
+          font: v.fontSize,
+          span: v.span,
+          bbox: box,
+          onScreen,
+          overHud: input.hud.filter((r) => overlaps(r, box)).length,
+          overHall: overlaps(input.hall, box),
+        }
       },
       screenPos: (id) => {
         const b = boxOf(this.world, id)

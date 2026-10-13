@@ -1,6 +1,9 @@
-import { Link } from 'react-router-dom'
+import { useRef } from 'react'
+import { Link, useLocation, useParams } from 'react-router-dom'
 import { GAMES, type GameMeta } from '../games'
+import { useOnline, type OnlineStatus, type Stats } from '../shared/online'
 import { getBest } from '../shared/storage'
+import { Leaderboard, LIVE_SITE } from './Leaderboard'
 import './Hub.css'
 
 function GameIcon({ slug }: { slug: string }) {
@@ -117,7 +120,63 @@ function GameIcon({ slug }: { slug: string }) {
   }
 }
 
-function GameCard({ game, index }: { game: GameMeta; index: number }) {
+const fmt = (n: number) => n.toLocaleString('en-US')
+
+function LiveDot({ on }: { on: boolean }) {
+  return <span className={`live-dot${on ? ' live-dot--on' : ''}`} aria-hidden="true" />
+}
+
+/** "● 3 playing now · 128 players so far" under the title; a quiet grey line when offline. */
+function LiveStrip({ status, stats, onLeaderboard }: { status: OnlineStatus; stats: Stats | null; onLeaderboard: () => void }) {
+  if (status === 'offline') {
+    const onLiveSite = window.location.hostname === new URL(LIVE_SITE).hostname
+    return (
+      <p className="hub-live hub-live--offline">
+        <LiveDot on={false} />
+        {onLiveSite ? (
+          'Live counters are offline right now'
+        ) : (
+          <span>
+            Live counters run on{' '}
+            <a href={LIVE_SITE} target="_blank" rel="noopener">
+              the live site
+            </a>
+          </span>
+        )}
+      </p>
+    )
+  }
+  if (!stats) {
+    return (
+      <p className="hub-live hub-live--loading" aria-hidden="true">
+        <LiveDot on={false} />
+        <span className="hub-live__skeleton" />
+      </p>
+    )
+  }
+  return (
+    <p className="hub-live">
+      <LiveDot on={stats.online > 0} />
+      <span>
+        <b>{fmt(stats.online)}</b> playing now
+      </span>
+      <span className="hub-live__sep" aria-hidden="true">
+        ·
+      </span>
+      <span>
+        <b>{fmt(stats.players)}</b> {stats.players === 1 ? 'player' : 'players'} so far
+      </span>
+      <span className="hub-live__sep" aria-hidden="true">
+        ·
+      </span>
+      <Link to="/leaderboard" className="hub-live__link" onClick={onLeaderboard}>
+        Leaderboard
+      </Link>
+    </p>
+  )
+}
+
+function GameCard({ game, index, live }: { game: GameMeta; index: number; live: { playing: number; played: number } | null }) {
   const best = getBest(game.slug)
   const style = {
     '--accent': game.accent,
@@ -131,7 +190,17 @@ function GameCard({ game, index }: { game: GameMeta; index: number }) {
         <GameIcon slug={game.slug} />
       </div>
       <div className="hub-card__body">
-        <span className="hub-card__company">{game.company}</span>
+        <div className="hub-card__meta">
+          <span className="hub-card__company">{game.company}</span>
+          {live && (
+            <span className="hub-card__live">
+              <LiveDot on={live.playing > 0} />
+              <span>
+                <b>{fmt(live.playing)}</b> playing · <b>{fmt(live.played)}</b> played
+              </span>
+            </span>
+          )}
+        </div>
         <h2 className="hub-card__title">{game.title}</h2>
         <p className="hub-card__inspired">Inspired by {game.inspiredBy}</p>
         <p className="hub-card__howto">{game.howto}</p>
@@ -145,8 +214,20 @@ function GameCard({ game, index }: { game: GameMeta; index: number }) {
 }
 
 export function Hub() {
+  const { pathname } = useLocation()
+  const { game } = useParams()
+  const { status, stats } = useOnline()
+  const scrollRef = useRef<HTMLElement>(null)
+  // `/leaderboard/:game?` renders the hub with that board selected and scrolled into view
+  const focus = pathname.startsWith('/leaderboard') ? (GAMES.some((g) => g.slug === game) ? (game as string) : 'all') : null
+  const live = status === 'online' && stats
+  const scrollToBoard = () => {
+    // the route effect only fires when the board changes – nudge it when it is already selected
+    if (focus === 'all') document.getElementById('leaderboard')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }
+
   return (
-    <main className="hub">
+    <main className="hub" ref={scrollRef}>
       <div className="hub__bg" aria-hidden="true" />
       <header className="hub__header">
         <span className="hub__brand">Havaida</span>
@@ -157,13 +238,21 @@ export function Hub() {
           Six tiny browser games with an IT twist – ticket triage, network puzzles, building access, signal
           command codes, bug breaking and data-centre uptime. Each one is playable in ten seconds, on desktop or phone.
         </p>
+        <LiveStrip status={status} stats={stats} onLeaderboard={scrollToBoard} />
       </header>
 
       <section className="hub__grid" aria-label="Games">
         {GAMES.map((g, i) => (
-          <GameCard game={g} index={i} key={g.slug} />
+          <GameCard
+            game={g}
+            index={i}
+            key={g.slug}
+            live={live ? { playing: live.onlineByGame[g.slug] ?? 0, played: live.playersByGame[g.slug] ?? 0 } : null}
+          />
         ))}
       </section>
+
+      <Leaderboard focus={focus} scrollRoot={scrollRef} />
 
       <footer className="hub__footer">
         <p>

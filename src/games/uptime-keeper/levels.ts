@@ -139,28 +139,57 @@ const LEVEL_TEXT: Record<number, { title: string; intro: string }> = {
       '24 racks in three rows, backed by a UPS: a power fault now gives 40 seconds of battery instead of 10, and power capacity grows 30 % – room for more server upgrades.',
   },
   6: {
-    title: 'Automated monitoring',
+    title: 'Customer service',
     intro:
-      'Sensors raise overheating alerts already at 70 °C and auto-cool hot racks while the cooling pool is above 50 %. Watch alerts resolve themselves – and spend the saved time on repairs and upgrades.',
+      'Customers now walk in through the entrance, each complaining about one slow rack: REPAIR that rack (3 s) before their patience ring runs out – or TALK to them once for 15 s more. Escalations cost credits and SLA. Sensors also auto-cool hot racks while the cooling pool is above 50 %.',
   },
   7: {
     title: 'Large data centre',
     intro:
-      '28 racks, three CRACs, two switches, two PDUs. The camera follows you now – the map and the arrows at the screen edge show where the alerts are.',
+      '28 racks, three CRACs, two switches, two PDUs. The camera follows you now – the map and the arrows at the screen edge show where the alerts and customers are.',
   },
   8: {
     title: 'Endless shift',
     intro: 'Same hall, faster alerts, more at once. Every shift is 2.5 minutes – how long can you hold the SLA?',
   },
+  11: {
+    title: 'Malware outbreak',
+    intro:
+      'A virus slips in through a network port and roams the aisles. A rack it lingers next to for 2 s is infected: it counts as down and infects a neighbour every 12 s. Touch the virus to quarantine it, and REPAIR infected racks to clean them (4 s).',
+  },
+  12: {
+    title: 'Malware outbreak',
+    intro: 'Same hall, faster alerts – and the virus moves a little faster every shift. Quarantine it on sight.',
+  },
+  13: {
+    title: 'Twin viruses',
+    intro: 'From now on two viruses can roam the hall at once. Quarantine them early and clean every infected rack before it spreads.',
+  },
+  14: {
+    title: 'Endless outbreak',
+    intro: 'Faster alerts, two faster viruses, customers at the door. Every shift is 2.5 minutes – how long can you hold the SLA?',
+  },
+}
+
+/** Levels 9–10 reuse the level-8 text, 12 has its own, 14+ share the endless-outbreak text. */
+function textFor(n: number) {
+  const k = Math.max(1, Math.floor(n))
+  if (LEVEL_TEXT[k]) return LEVEL_TEXT[k]
+  return k < 11 ? LEVEL_TEXT[8] : LEVEL_TEXT[14]
 }
 
 export function levelTitle(n: number): string {
-  return LEVEL_TEXT[Math.min(Math.max(1, n), 8)].title
+  return textFor(n).title
 }
 
 export function levelIntro(n: number): string {
-  return LEVEL_TEXT[Math.min(Math.max(1, n), 8)].intro
+  return textFor(n).intro
 }
+
+/** Viruses roaming at once from this level on (one from level 11, two from 13). */
+export const VIRUS_LEVEL = 11
+export const TWIN_VIRUS_LEVEL = 13
+export const CUSTOMER_LEVEL = 6
 
 export function getLevel(n: number): LevelDef {
   const idx = Math.min(Math.max(1, n), 7)
@@ -169,8 +198,9 @@ export function getLevel(n: number): LevelDef {
   const types: AlertType[] = ['heat', 'fan']
   if (n >= 2) types.push('net')
   if (n >= 3) types.push('power', 'psu')
-  // Spawn interval 14 s → 6 s over the seven halls, then keeps shrinking in endless mode.
-  const spawnStart = Math.max(3.5, [14, 12, 10, 9, 8, 7, 6][idx - 1] - over * 0.5)
+  // Spawn interval 14 s → 6.5 s over the seven halls, then keeps shrinking in endless mode.
+  // (Levels 6 and 7 were 7 s / 6 s; the extra half second offsets the customers that arrive from level 6 on.)
+  const spawnStart = Math.max(3.5, [14, 12, 10, 9, 8, 7.5, 6.5][idx - 1] - over * 0.5)
   const spawnEnd = Math.max(2.8, spawnStart * 0.75)
   const maxAlerts = Math.min(7, [1, 2, 3, 3, 4, 4, 5][idx - 1] + Math.floor(over / 2))
   return {
@@ -194,6 +224,9 @@ export function getLevel(n: number): LevelDef {
     ups: n >= 5,
     tutorial: n === 1,
     endless: n >= 8,
+    customers: n >= CUSTOMER_LEVEL,
+    viruses: n >= TWIN_VIRUS_LEVEL ? 2 : n >= VIRUS_LEVEL ? 1 : 0,
+    virusSpeed: Math.min(2.5, 1.5 + 0.1 * Math.max(0, n - VIRUS_LEVEL)),
   }
 }
 
@@ -401,6 +434,9 @@ export function buildHall(level: LevelDef): HallLayout {
     // on the pad, and (for the one-row pad) just out of reach of the rack row behind it
     start: { x: pad.cx + pad.w / 2, y: pad.cy + pad.h / 2 + (pad.h === 1 ? 0.22 : 0) },
     zones: zoned ? blocks.map((_, i) => ZONES[i]) : ['A'],
+    // The visitor entrance sits in the left wall at the bottom walkway – a row no cooling unit
+    // ever uses. The cell stays solid wall for the technician; visitors pass on a scripted path.
+    door: blocks.length > 1 ? { y: rows - 2 } : null,
   }
 }
 

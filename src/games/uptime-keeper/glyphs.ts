@@ -5,7 +5,24 @@
  */
 import type { ActionKind, AlertType, PipeKind } from './types'
 
-export type GlyphName = 'heat' | 'wrench' | 'plug' | 'wifi' | 'wifiOff' | 'bolt' | 'chevrons' | 'snow' | 'cross' | 'check' | 'power'
+export type GlyphName =
+  | 'heat'
+  | 'wrench'
+  | 'plug'
+  | 'wifi'
+  | 'wifiOff'
+  | 'bolt'
+  | 'chevrons'
+  | 'snow'
+  | 'cross'
+  | 'check'
+  | 'power'
+  | 'person'
+  | 'slow'
+  | 'bug'
+  | 'skull'
+  | 'chat'
+  | 'thumb'
 
 export interface GlyphPart {
   d: string
@@ -38,6 +55,29 @@ export const GLYPHS: Record<GlyphName, GlyphPart[]> = {
   cross: [{ d: 'M5.5 5.5l13 13M18.5 5.5l-13 13' }],
   check: [{ d: 'M4.8 12.6l4.8 4.8L19.4 7.2' }],
   power: [{ d: 'M12 3.2v8.4M6.6 6.8a7.8 7.8 0 1 0 10.8 0' }],
+  // a visitor: head and shoulders
+  person: [{ d: 'M12 3.4a4 4 0 1 0 0 8 4 4 0 0 0 0-8z', fill: true }, { d: 'M4 21c0-4.6 3.6-7.6 8-7.6s8 3 8 7.6z', fill: true }],
+  // a snail – the rack is "crawling"
+  slow: [
+    { d: 'M2.6 18.6h18.2M3.4 18.6v-3.3a2.1 2.1 0 0 1 4.2 0M4.6 13.3 3.4 10.2M6.4 13.3l1.1-3.1M14.6 12.4a.9.9 0 0 0-.9.9 1.9 1.9 0 0 0 1.9 1.9 2.9 2.9 0 0 0 2.9-2.9 3.9 3.9 0 0 0-3.9-3.9' },
+    { d: 'M14.5 6.4a6.1 6.1 0 1 0 0 12.2 6.1 6.1 0 0 0 0-12.2z' },
+  ],
+  // the virus: a little beetle
+  bug: [
+    { d: 'M12 8.2c-3 0-5 2.6-5 6s2 6 5 6 5-2.6 5-6-2-6-5-6zM12 8.6v11.4M7 12.2 3.4 10.4M7 15h-3.8M7.6 18.2 4.4 20.4M17 12.2l3.6-1.8M17 15h3.8M16.4 18.2l3.2 2.2M10.4 5 8.8 2.6M13.6 5l1.6-2.4' },
+    { d: 'M12 3.6a2.9 2.9 0 1 0 0 5.8 2.9 2.9 0 0 0 0-5.8z', fill: true },
+  ],
+  // malware on a rack
+  skull: [
+    { d: 'M12 3.3c-4.6 0-8 3.1-8 7.5 0 2.6 1.2 4.4 3 5.4v3.6h10v-3.6c1.8-1 3-2.8 3-5.4 0-4.4-3.4-7.5-8-7.5zM10 17.2v2.4M14 17.2v2.4' },
+    { d: 'M9 9.2a2 2 0 1 0 0 4 2 2 0 0 0 0-4zM15 9.2a2 2 0 1 0 0 4 2 2 0 0 0 0-4zM12 13.8l-1.2 2h2.4z', fill: true },
+  ],
+  // TALK
+  chat: [
+    { d: 'M4.4 4.8h15.2c1 0 1.8.8 1.8 1.8v9c0 1-.8 1.8-1.8 1.8h-8.4l-4.8 3.6v-3.6h-2c-1 0-1.8-.8-1.8-1.8v-9c0-1 .8-1.8 1.8-1.8z' },
+    { d: 'M8 9.8a1.3 1.3 0 1 0 0 2.6 1.3 1.3 0 0 0 0-2.6zM12 9.8a1.3 1.3 0 1 0 0 2.6 1.3 1.3 0 0 0 0-2.6zM16 9.8a1.3 1.3 0 1 0 0 2.6 1.3 1.3 0 0 0 0-2.6z', fill: true },
+  ],
+  thumb: [{ d: 'M3 10.6h3.6v9.8H3zM8.2 10.6l3.4-6.2c.5-.9 1.4-1.3 2.3-1 1 .4 1.5 1.4 1.2 2.4l-1 3.6h5.2c1.3 0 2.2 1.2 2 2.4l-1.3 6.6c-.2 1.1-1.2 2-2.3 2H8.2z', fill: true }],
 }
 
 export const ALERT_GLYPH: Record<AlertType, GlyphName> = {
@@ -48,7 +88,14 @@ export const ALERT_GLYPH: Record<AlertType, GlyphName> = {
   power: 'bolt',
   upgrade: 'chevrons',
   down: 'cross',
+  // the slow rack carries the snail; the objective row shows the person (OBJECTIVE_GLYPH)
+  customer: 'slow',
+  infected: 'skull',
+  virus: 'bug',
 }
+
+/** Icon of an objective row (the customer row shows who is waiting, not the rack's symptom). */
+export const OBJECTIVE_GLYPH: Record<AlertType, GlyphName> = { ...ALERT_GLYPH, customer: 'person' }
 
 export const COLORS = {
   cooling: '#1ec8ff',
@@ -60,6 +107,10 @@ export const COLORS = {
   warn: '#ffb020',
   off: '#59606e',
   ficolo: '#e8102a',
+  customer: '#ff6ec7',
+  virus: '#b04dff',
+  /** The virus' acid-green highlights. */
+  toxic: '#b4ff39',
 } as const
 
 export const PIPE_COLOR: Record<PipeKind, string> = { cooling: COLORS.cooling, power: COLORS.power, network: COLORS.network }
@@ -72,6 +123,9 @@ export const ALERT_COLOR: Record<AlertType, string> = {
   power: COLORS.power,
   upgrade: COLORS.upgrade,
   down: COLORS.alert,
+  customer: COLORS.customer,
+  infected: COLORS.virus,
+  virus: COLORS.virus,
 }
 
 export const ACTION_GLYPH: Record<ActionKind, GlyphName> = { cool: 'snow', repair: 'wrench', upgrade: 'chevrons' }

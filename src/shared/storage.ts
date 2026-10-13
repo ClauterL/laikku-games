@@ -23,9 +23,20 @@ export function getBest(game: string): number {
   return loadJSON<number>(`${game}:best`, 0)
 }
 
-/** Stores the score if it beats the previous best. Returns the new best. */
+/**
+ * Stores the score if it beats the previous best. Returns the new best.
+ * Also announces the finished run as a `havaida:score` window event – the online layer
+ * (`online.ts`, mounted by the App) listens for it, so this module never imports it.
+ */
 export function submitBest(game: string, score: number): number {
   const best = Math.max(getBest(game), Math.round(score))
   saveJSON(`${game}:best`, best)
+  try {
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('havaida:score', { detail: { game, score: Math.round(score) } }))
+    }
+  } catch {
+    /* never let the online layer break a game */
+  }
   return best
 }

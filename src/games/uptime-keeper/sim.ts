@@ -6,16 +6,24 @@
  *
  * Thermal model (°C per second, per rack):
  *   m     = serverMult(level) × hall heat factor × 0.8^(cooling level − 1)
- *   fault = hot spot (1.7·m, faster while still below the alert threshold)
- *         + broken fan (ramps to 1.3·m – the "×2.5 heat" of a dead fan)
+ *   fault = hot spot (3.4·m, faster while still below the alert threshold)
+ *         + broken fan (ramps to 2.6·m – the "×2.5 heat" of a dead fan)
  *   A healthy rack rests at an idle temperature (≈ 40–44 °C at m = 1). A fault
  *   makes it climb until somebody deals with it; upgrades only slow the climb,
  *   so an ignored alert always ends in a 100 °C shutdown. Server levels raise
  *   m: the rack earns more but idles hotter, burns faster, and above m = 1.5
  *   creeps upwards on its own until the cooling level catches up.
+ *   Every heating rate and ramp is scaled by HEAT_SPEED, so a rack reaches the
+ *   warning, critical and shutdown temperatures in 1 / HEAT_SPEED of the time;
+ *   the cooling side (COOL, boost, relaxation, pool) is not scaled.
+ *
+ * Level 6+ adds customers (a complaint tied to one rack with a performance
+ * fault, patience timer, TALK to calm them once) and level 11+ a roaming virus
+ * (infects racks it lingers next to; infections spread until cleaned).
  */
-import { buildHall, SLA_FAIL, SLA_PASS, SLA_THREE, SLA_TWO } from './levels'
-import type { Alert, AlertType, Carry, LevelDef, Rack, Repair, Station, UpgradeKind, World } from './types'
+import { buildHall, isWalkable, SLA_FAIL, SLA_PASS, SLA_THREE, SLA_TWO } from './levels'
+import { accessCell, findPath, smoothPath } from './pathfind'
+import type { Alert, AlertType, Carry, Customer, Dir, HallLayout, LevelDef, Pt, Rack, Repair, Station, UpgradeKind, Virus, World } from './types'
 
 export const AMBIENT = 24
 export const WARN_TEMP = 80
@@ -26,15 +34,29 @@ export const MONITOR_TEMP = 70
 const COLD_FLOOR = AMBIENT + 6
 
 const IDLE_RISE = 16
-const HOT_RATE = 1.7
+/**
+ * The owner asked for half the heating time ("speed the game up"): every
+ * heat-up path – hot spots, dead fans, server-level creep, warm-up – runs at
+ * this multiple of the original rates. Cooling strength is deliberately not scaled.
+ */
+export const HEAT_SPEED = 2
+const HOT_RATE = 1.7 * HEAT_SPEED
 const HOT_PREHEAT = 1.8
-const FAN_RATE = 1.3
+/** Hot-spot strength ramps 0 → 1 at this rate (per second). */
+const HOT_RAMP = 0.5 * HEAT_SPEED
+const FAN_RATE = 1.3 * HEAT_SPEED
 const FAN_BROKEN_MULT = 2.5
-const ORGANIC_RATE = 1
+/** A dead fan degrades towards ×2.5 at this rate (per second). */
+const FAN_RAMP = 0.3 * HEAT_SPEED
+const ORGANIC_RATE = 1 * HEAT_SPEED
 const HEADROOM = 1.5
 const RELAX_RATE = 1.6
-const WARMUP_RATE = 1
+const WARMUP_RATE = 1 * HEAT_SPEED
 const BOOST_RATE = 2.5
+
+/** Seconds before an ignored tutorial lesson moves on (35 s / 30 s at the original heat speed). */
+const LESSON_COOL_TIME = 35 / HEAT_SPEED
+const LESSON_REPAIR_TIME = 30 / HEAT_SPEED
 
 export const COOL_INSTANT = 30
 export const COOL_WEAK = 8
@@ -60,9 +82,55 @@ export const MAX_UPGRADE = 4
 // Tuned so the first upgrade is affordable about a minute into level 1 and the
 // infrastructure is maxed around level 3 – after that credits go into server levels.
 const CREDITS_PER_RACK_SEC = 0.3
-export const REWARD: Record<AlertType, number> = { heat: 30, fan: 40, psu: 60, net: 80, power: 80, upgrade: 0, down: 20 }
-export const REPAIR_TIME: Record<Repair['kind'], number> = { fan: 3, psu: 6, reboot: 3, switch: 4, pdu: 5 }
-const PRIORITY: Record<AlertType, number> = { down: 6, power: 5, heat: 4, net: 3, psu: 2, fan: 1, upgrade: 0 }
+export const REWARD: Record<AlertType, number> = { heat: 30, fan: 40, psu: 60, net: 80, power: 80, upgrade: 0, down: 20, customer: 60, infected: 30, virus: 50 }
+export const REPAIR_TIME: Record<Repair['kind'], number> = { fan: 3, psu: 6, reboot: 3, switch: 4, pdu: 5, clean: 4, perf: 3 }
+// Containment before recovery: catch the source, clean what spreads, then bring dark racks back.
+const PRIORITY: Record<AlertType, number> = { virus: 6.4, infected: 6.2, down: 6, power: 5, heat: 4, net: 3, customer: 2.5, psu: 2, fan: 1, upgrade: 0 }
+
+/* customers (level 6+) */
+/** Seconds a customer waits before escalating; TALK adds TALK_BONUS once. */
+export const PATIENCE = 30
+export const TALK_BONUS = 15
+/** How close (tile units, feet to feet) the technician must stand to talk or zap. */
+export const ENTITY_REACH = 1.05
+const CUSTOMER_FIRST = 12
+const CUSTOMER_GAP_MIN = 35
+const CUSTOMER_GAP_MAX = 55
+const MAX_CUSTOMERS = 2
+const CUSTOMER_SPEED = 2.1
+const LEAVE_HAPPY_SPEED = 2.5
+const LEAVE_ANGRY_SPEED = 3.4
+/** Score per second of patience left when the fix lands. */
+const HAPPY_BONUS = 2
+/** An escalation is booked as an SLA credit worth this much uptime (percentage points) … */
+export const ESCALATION_SLA = 0.02
+/** … plus a credit penalty. */
+export const ESCALATION_FINE = 40
+
+/** Rotating complaints; `{rack}` becomes the rack's name. */
+const COMPLAINTS = [
+  'Our webshop is crawling – {rack}!',
+  "I can't reach my VM on {rack}!",
+  'Backup on {rack} failed again!',
+  'Why is latency 400 ms? {rack}!',
+  'Our API times out – {rack}!',
+  'Checkout keeps freezing – {rack}!',
+  'Our database is so slow – {rack}!',
+  'Video calls keep dropping – {rack}!',
+]
+
+/* virus (level 11+) */
+/** Seconds a virus has to sit next to a rack to infect it. */
+export const INFECT_TIME = 2
+/** An infected rack passes the malware to a neighbour about this often. */
+export const SPREAD_TIME = 12
+/** Touching the virus quarantines it (feet to feet, tile units). */
+export const TOUCH_DIST = 0.5
+const VIRUS_FIRST = 8
+const TWIN_DELAY = 25
+const VIRUS_RESPAWN_MIN = 45
+const VIRUS_RESPAWN_MAX = 60
+const VIRUS_SPAWN_TIME = 0.9
 
 export const serverMult = (lv: number) => 1 + 0.35 * (lv - 1)
 export const serverScoreMult = (lv: number) => 1 + 0.5 * (lv - 1)
@@ -109,6 +177,10 @@ export function createWorld(level: LevelDef, carry: Carry, rng: () => number): W
       switchId: r.switchId,
       ledSeed: i * 7919 + 13,
       heatAlerted: false,
+      perf: false,
+      infected: false,
+      spreadT: 0,
+      infecting: 0,
     }
   })
   const w: World = {
@@ -144,6 +216,28 @@ export function createWorld(level: LevelDef, carry: Carry, rng: () => number): W
     rng,
     breached: null,
     spawnsEnabled: !level.tutorial,
+    customers: [],
+    viruses: [],
+    entitySeq: 1,
+    nextCustomer: Infinity,
+    complaintIdx: 0,
+    virusQueue: [],
+    visitors: 0,
+    virusSpawns: 0,
+    happy: 0,
+    escalations: 0,
+    quarantined: 0,
+    infections: 0,
+    cleaned: 0,
+  }
+  // (halls without customers or viruses draw nothing extra from the RNG, so their fault rolls stay as they were)
+  if (level.customers && hall.door) {
+    w.nextCustomer = CUSTOMER_FIRST + rng() * 6
+    w.complaintIdx = Math.floor(rng() * COMPLAINTS.length)
+  }
+  if (level.viruses > 0) {
+    const first = VIRUS_FIRST + rng() * 4
+    for (let i = 0; i < level.viruses; i++) w.virusQueue.push(first + i * TWIN_DELAY)
   }
   for (const r of racks) r.temp = idleTemp(w, r)
   w.coolMax = coolMaxFor(w)
@@ -222,9 +316,12 @@ function finishTutorial(w: World) {
   w.nextSpawn = w.time + 7
 }
 
-/** Is the rack a sensible target for a brand-new fault? */
+/** Is the rack a sensible target for a brand-new fault (or a customer's complaint)? */
 const healthyRack = (w: World, r: Rack) =>
-  !r.down && r.powered && r.fanOk && r.psuOk && r.hotspotTarget === 0 && r.hotspot < 0.05 && r.temp < 66 && !alertFor(w, r.id)
+  !r.down && r.powered && r.fanOk && r.psuOk && !r.perf && !r.infected && r.hotspotTarget === 0 && r.hotspot < 0.05 && r.temp < 66 && !alertFor(w, r.id)
+
+/** Customer complaints and malware sit on a rack next to its hardware alerts; anything else blocks a new heat alert. */
+const blocksHeatAlert = (w: World, id: string) => w.alerts.some((a) => a.targetId === id && a.type !== 'customer' && a.type !== 'infected')
 
 /**
  * Starts a fault. Without `targetId` a random healthy target is picked.
@@ -325,13 +422,14 @@ export function stepWorld(w: World, dt: number) {
   for (const a of w.alerts) a.age += dt
   const L = w.level
 
-  // guided opening of level 1: one slow hot spot, then one fan failure
+  // guided opening of level 1: one slow hot spot, then one fan failure. A lesson the
+  // player ignores times out at about the same temperature whatever the heat speed.
   if (w.tutorialStep < 5) {
     if (w.tutorialStep === 0) {
       if (w.time >= 1.2) {
         spawnFault(w, 'heat', 'R03', true)
         w.tutorialStep = 1
-        w.tutorialTimer = 35
+        w.tutorialTimer = LESSON_COOL_TIME
       }
     } else {
       w.tutorialTimer -= dt
@@ -344,7 +442,7 @@ export function stepWorld(w: World, dt: number) {
           // fall back to any healthy rack if Rack 05 is unavailable (the first lesson went wrong)
           if (!spawnFault(w, 'fan', 'R05', true)) spawnFault(w, 'fan', undefined, true)
           w.tutorialStep = 3
-          w.tutorialTimer = 30
+          w.tutorialTimer = LESSON_REPAIR_TIME
         } else if (w.tutorialStep === 3) finishTutorial(w)
         else w.tutorialStep = 5
       }
@@ -358,6 +456,9 @@ export function stepWorld(w: World, dt: number) {
     const interval = L.spawnStart + (L.spawnEnd - L.spawnStart) * k
     w.nextSpawn = w.time + interval * (0.75 + w.rng() * 0.5)
   }
+
+  stepCustomers(w, dt)
+  stepViruses(w, dt)
 
   // cooling pool regenerates (4 %/s, +1 % per cooling level)
   w.coolPool = Math.min(w.coolMax, w.coolPool + (POOL_REGEN + (w.upgrades.cooling - 1)) * (w.coolMax / 100) * dt)
@@ -392,8 +493,8 @@ export function stepWorld(w: World, dt: number) {
     else if (r.powered && r.down && r.downReason !== 'heat') reboot(w, r)
 
     // heat
-    r.fanMult = r.fanOk ? 1 : Math.min(FAN_BROKEN_MULT, r.fanMult + 0.3 * dt)
-    r.hotspot = r.hotspot < r.hotspotTarget ? Math.min(r.hotspotTarget, r.hotspot + 0.5 * dt) : Math.max(r.hotspotTarget, r.hotspot - 1.2 * dt)
+    r.fanMult = r.fanOk ? 1 : Math.min(FAN_BROKEN_MULT, r.fanMult + FAN_RAMP * dt)
+    r.hotspot = r.hotspot < r.hotspotTarget ? Math.min(r.hotspotTarget, r.hotspot + HOT_RAMP * dt) : Math.max(r.hotspotTarget, r.hotspot - 1.2 * dt)
     if (r.boost > 0) r.boost = Math.max(0, r.boost - dt)
     const online = r.powered && !r.down
     const m = heatMult(w, r)
@@ -423,7 +524,7 @@ export function stepWorld(w: World, dt: number) {
         applyCool(w, r)
         w.autoCools++
         w.events.push({ kind: 'autocool', rackId: r.id })
-      } else if (r.temp >= threshold && !r.heatAlerted && !alertFor(w, r.id)) {
+      } else if (r.temp >= threshold && !r.heatAlerted && !blocksHeatAlert(w, r.id)) {
         r.heatAlerted = true
         addAlert(w, 'heat', r.id, false, r.hotspotTarget > 0)
       }
@@ -432,13 +533,20 @@ export function stepWorld(w: World, dt: number) {
     const heatAlert = alertFor(w, r.id, 'heat')
     if (heatAlert && !r.down && r.hotspotTarget === 0 && r.temp < threshold - 5) resolveAlert(w, heatAlert, true)
 
+    // malware passes to a neighbour every SPREAD_TIME – not while the technician is cleaning it
+    if (r.infected && !(w.repair && w.repair.targetId === r.id && w.repair.kind === 'clean')) {
+      r.spreadT -= dt
+      if (r.spreadT <= 0) spread(w, r)
+    }
+
     if (r.linkOk) linked++
-    if (r.down) {
+    // malware counts as down; a slow rack (performance fault) or a lost link as half
+    if (r.down || r.infected) {
       downCount++
       penalty += 1
     } else {
       const earn = CREDITS_PER_RACK_SEC * serverScoreMult(r.serverLevel)
-      if (r.linkOk) income += earn
+      if (r.linkOk && !r.perf) income += earn
       else {
         penalty += DEGRADED_WEIGHT
         income += earn * 0.5
@@ -543,6 +651,8 @@ export type RepairPlan = { kind: Repair['kind']; duration: number; swap: boolean
 export function repairKindFor(w: World, targetId: string): RepairPlan {
   const r = w.rackById.get(targetId)
   if (r) {
+    // malware first: it keeps spreading while anything else is fixed
+    if (r.infected) return { kind: 'clean', duration: REPAIR_TIME.clean, swap: false }
     if (r.down && r.downReason === 'heat') {
       if (!r.powered) return { kind: null, why: 'No power – repair the PDU first' }
       if (r.temp >= REBOOT_TEMP) return { kind: null, why: `COOL ${r.name} below ${REBOOT_TEMP} °C first` }
@@ -551,6 +661,7 @@ export function repairKindFor(w: World, targetId: string): RepairPlan {
     if (!r.fanOk) return { kind: 'fan', duration: REPAIR_TIME.fan, swap: false }
     if (!r.psuOk) return { kind: 'psu', duration: REPAIR_TIME.psu, swap: false }
     if (r.down) return { kind: null, why: `${r.name} is dark – repair ${w.stationById.get(r.pduId)!.name}` }
+    if (r.perf) return { kind: 'perf', duration: REPAIR_TIME.perf, swap: false }
     return { kind: null, why: `${r.name} has no fault` }
   }
   const s = w.stationById.get(targetId)
@@ -608,6 +719,14 @@ function completeRepair(w: World) {
       if (r.down && r.downReason === 'heat') reboot(w, r)
       const a = alertFor(w, r.id, 'down')
       if (a) resolveAlert(w, a, true)
+    } else if (rep.kind === 'clean') {
+      r.infected = false
+      r.spreadT = 0
+      w.cleaned++
+      const a = alertFor(w, r.id, 'infected')
+      if (a) resolveAlert(w, a, true)
+    } else if (rep.kind === 'perf') {
+      fixPerformance(w, r)
     }
   } else {
     const s = w.stationById.get(rep.targetId)
@@ -623,6 +742,474 @@ function fixStation(w: World, s: Station) {
   s.battery = -1
   const a = alertFor(w, s.id, s.kind === 'switch' ? 'net' : 'power')
   if (a) resolveAlert(w, a, true)
+}
+
+/* ---------- walking (customers + viruses) ---------- */
+
+/** Moves an entity along its waypoints at `speed` tiles/s; returns the step taken. */
+function walkAlong(e: { x: number; y: number; path: Pt[] }, speed: number, dt: number): Pt {
+  const x0 = e.x
+  const y0 = e.y
+  let budget = speed * dt
+  while (budget > 1e-6 && e.path.length) {
+    const wp = e.path[0]
+    const dx = wp.x - e.x
+    const dy = wp.y - e.y
+    const d = Math.hypot(dx, dy)
+    if (d <= budget) {
+      e.x = wp.x
+      e.y = wp.y
+      e.path.shift()
+      budget -= d
+    } else {
+      e.x += (dx / d) * budget
+      e.y += (dy / d) * budget
+      budget = 0
+    }
+  }
+  return { x: e.x - x0, y: e.y - y0 }
+}
+
+const dirOf = (dx: number, dy: number, cur: Dir): Dir =>
+  Math.abs(dx) > Math.abs(dy) * 1.15 ? (dx > 0 ? 'right' : 'left') : Math.abs(dy) > Math.abs(dx) * 1.15 ? (dy > 0 ? 'down' : 'up') : cur
+
+const cellKey = (hall: HallLayout, x: number, y: number) => y * hall.cols + x
+const reservedCache = new WeakMap<HallLayout, Set<number>>()
+
+/** Cells a waiting visitor keeps clear: rack and unit fronts, the floor pad and the doorway. */
+function reservedCells(hall: HallLayout): Set<number> {
+  let set = reservedCache.get(hall)
+  if (set) return set
+  set = new Set<number>()
+  for (const r of hall.racks) set.add(cellKey(hall, r.cx, r.cy + 1))
+  for (const s of hall.stations) {
+    if (s.facing === 'down') {
+      for (let x = s.cx; x < s.cx + s.w; x++) set.add(cellKey(hall, x, s.cy + s.h))
+    } else {
+      const x = s.facing === 'left' ? s.cx - 1 : s.cx + s.w
+      for (let y = s.cy; y < s.cy + s.h; y++) set.add(cellKey(hall, x, y))
+    }
+  }
+  const p = hall.pad
+  for (let y = p.cy; y < p.cy + p.h; y++) for (let x = p.cx; x < p.cx + p.w; x++) set.add(cellKey(hall, x, y))
+  if (hall.door) set.add(cellKey(hall, 1, hall.door.y))
+  reservedCache.set(hall, set)
+  return set
+}
+
+/** Where a visitor stands just inside / outside the entrance (tile units). */
+export const doorInside = (door: { y: number }): Pt => ({ x: 1.5, y: door.y + 0.5 })
+export const DOOR_OUTSIDE_X = -0.8
+
+function pickWeighted<T>(w: World, items: { v: T; wt: number }[]): number {
+  let total = 0
+  for (const it of items) total += it.wt
+  let roll = w.rng() * total
+  for (let i = 0; i < items.length; i++) {
+    roll -= items[i].wt
+    if (roll <= 0) return i
+  }
+  return items.length - 1
+}
+
+/* ---------- customers (level 6+) ---------- */
+
+export const customerById = (w: World, id: string): Customer | undefined => w.customers.find((c) => c.id === id)
+/** The customer still waiting for a fix on this rack. */
+export const customerFor = (w: World, rackId: string): Customer | undefined => w.customers.find((c) => c.rackId === rackId && c.state !== 'leave')
+/** Customers in the hall with an open complaint (not on their way out). */
+export const waitingCustomers = (w: World) => w.customers.filter((c) => c.state !== 'leave')
+
+/** A free aisle cell a few steps from the entrance, away from the other visitor. */
+function pickSpot(w: World): Pt | null {
+  const hall = w.hall
+  const door = hall.door
+  if (!door) return null
+  const reserved = reservedCells(hall)
+  const { x: ix, y: iy } = doorInside(door)
+  const taken = waitingCustomers(w).map((c) => c.spot)
+  const cands: { v: Pt; wt: number }[] = []
+  for (let y = 1; y < hall.rows - 1; y++) {
+    for (let x = 1; x < hall.cols - 1; x++) {
+      if (!isWalkable(hall, x, y) || reserved.has(cellKey(hall, x, y))) continue
+      const d = Math.abs(x + 0.5 - ix) + Math.abs(y + 0.5 - iy)
+      if (d < 2 || d > 7) continue
+      // keep the two speech bubbles apart
+      if (taken.some((t) => Math.abs(t.y - y) < 2 && Math.abs(t.x - x) < 5)) continue
+      cands.push({ v: { x, y }, wt: 1 / d })
+    }
+  }
+  if (!cands.length) return null
+  return cands[pickWeighted(w, cands)].v
+}
+
+/** In through the doorway, then A* along the aisles to the waiting cell. */
+function routeIn(w: World, c: Customer): Pt[] | null {
+  const hall = w.hall
+  const inside = doorInside(hall.door!)
+  const cells = findPath(hall, { x: 1, y: hall.door!.y }, c.spot)
+  if (!cells) return null
+  return [{ x: inside.x, y: c.y }, ...smoothPath(hall, { x: inside.x, y: c.y }, cells)]
+}
+
+/** Back to the doorway and out of the hall. */
+function routeOut(w: World, c: Customer): Pt[] {
+  const hall = w.hall
+  const door = hall.door!
+  const inside = doorInside(door)
+  const cx = Math.floor(c.x)
+  const cy = Math.floor(c.y)
+  // still in the doorway: straight back out
+  if (c.x < 1 || !isWalkable(hall, cx, cy)) return [{ x: DOOR_OUTSIDE_X - 0.15, y: c.y }]
+  const pts: Pt[] = []
+  const cells = findPath(hall, { x: cx, y: cy }, { x: 1, y: door.y })
+  if (cells) pts.push(...smoothPath(hall, c, cells))
+  pts.push(inside, { x: DOOR_OUTSIDE_X - 0.15, y: inside.y })
+  return pts
+}
+
+/**
+ * A customer walks in with a complaint about one rack, which gets a
+ * performance fault. Without `rackId` a healthy rack is picked.
+ */
+export function spawnCustomer(w: World, rackId?: string): boolean {
+  const door = w.hall.door
+  if (!door || waitingCustomers(w).length >= MAX_CUSTOMERS) return false
+  let rack = rackId ? w.rackById.get(rackId) : undefined
+  if (rackId && (!rack || rack.perf || rack.infected || rack.down || alertFor(w, rack.id, 'customer'))) return false
+  if (!rack) {
+    const cands = w.racks.filter((r) => healthyRack(w, r))
+    if (!cands.length) return false
+    rack = cands[Math.floor(w.rng() * cands.length)]
+  }
+  const spot = pickSpot(w)
+  if (!spot) return false
+  const c: Customer = {
+    id: `CUST${w.entitySeq++}`,
+    rackId: rack.id,
+    complaint: COMPLAINTS[w.complaintIdx++ % COMPLAINTS.length].replace('{rack}', rack.name),
+    look: Math.floor(w.rng() * 100000),
+    x: DOOR_OUTSIDE_X,
+    y: door.y + 0.5 + (w.rng() - 0.5) * 0.3,
+    dir: 'right',
+    path: [],
+    state: 'enter',
+    mood: 'upset',
+    moodT: 0,
+    patience: PATIENCE,
+    patienceMax: PATIENCE,
+    talked: false,
+    spot,
+    speed: CUSTOMER_SPEED,
+    walk: 0,
+    moving: false,
+    age: 0,
+  }
+  const route = routeIn(w, c)
+  if (!route) return false
+  c.path = route
+  rack.perf = true
+  w.customers.push(c)
+  w.visitors++
+  addAlert(w, 'customer', rack.id)
+  w.events.push({ kind: 'customerIn', id: c.id, rackId: rack.id, first: w.visitors === 1 })
+  return true
+}
+
+function stepCustomers(w: World, dt: number) {
+  const L = w.level
+  if (L.customers && w.spawnsEnabled && w.hall.door && w.time >= w.nextCustomer) {
+    // nobody arrives when there is no time left to help them
+    if (w.time >= L.duration - (PATIENCE + 8)) w.nextCustomer = Infinity
+    else if (waitingCustomers(w).length >= MAX_CUSTOMERS || !spawnCustomer(w)) w.nextCustomer = w.time + 4
+    else w.nextCustomer = w.time + CUSTOMER_GAP_MIN + w.rng() * (CUSTOMER_GAP_MAX - CUSTOMER_GAP_MIN)
+  }
+  for (let i = w.customers.length - 1; i >= 0; i--) {
+    const c = w.customers[i]
+    c.age += dt
+    c.moodT += dt
+    const step = walkAlong(c, c.speed, dt)
+    c.moving = Math.hypot(step.x, step.y) > 1e-5
+    if (c.moving) {
+      c.walk += dt * 11
+      c.dir = dirOf(step.x, step.y, c.dir)
+    }
+    if (c.state === 'leave') {
+      if (!c.path.length) w.customers.splice(i, 1)
+      continue
+    }
+    if (c.state === 'enter' && !c.path.length) {
+      c.state = 'wait'
+      c.dir = 'down'
+    }
+    // patience holds while the technician is working on their rack
+    if (!(w.repair && w.repair.targetId === c.rackId)) c.patience = Math.max(0, c.patience - dt)
+    if (c.patience <= 0) escalate(w, c)
+  }
+}
+
+function leave(w: World, c: Customer, mood: 'happy' | 'angry') {
+  c.state = 'leave'
+  c.mood = mood
+  c.moodT = 0
+  c.speed = mood === 'happy' ? LEAVE_HAPPY_SPEED : LEAVE_ANGRY_SPEED
+  c.path = routeOut(w, c)
+}
+
+/** Patience ran out: the customer storms off and the incident is booked as an SLA credit. */
+function escalate(w: World, c: Customer) {
+  const rack = w.rackById.get(c.rackId)
+  if (rack) rack.perf = false
+  const a = alertFor(w, c.rackId, 'customer')
+  if (a) resolveAlert(w, a, false)
+  if (w.repair && w.repair.targetId === c.rackId && w.repair.kind === 'perf') w.repair = null
+  const fine = Math.min(ESCALATION_FINE, Math.max(0, Math.floor(w.credits)))
+  w.credits -= fine
+  w.penalty += (ESCALATION_SLA / 100) * w.racks.length * SLA_WINDOW
+  w.escalations++
+  leave(w, c, 'angry')
+  w.events.push({ kind: 'customerAngry', id: c.id, rackId: c.rackId, credits: fine, sla: ESCALATION_SLA })
+}
+
+/** REPAIR finished on a slow rack: its customer (if still here) leaves happy. */
+function fixPerformance(w: World, r: Rack) {
+  r.perf = false
+  const a = alertFor(w, r.id, 'customer')
+  if (a) resolveAlert(w, a, true)
+  const c = customerFor(w, r.id)
+  if (!c) return
+  const bonus = Math.round(c.patience) * HAPPY_BONUS
+  w.score += bonus
+  w.happy++
+  leave(w, c, 'happy')
+  w.events.push({ kind: 'customerHappy', id: c.id, rackId: r.id, credits: REWARD.customer, bonus })
+}
+
+export function canTalk(w: World, id: string): { ok: boolean; why: string } {
+  const c = customerById(w, id)
+  if (!c || c.state === 'leave') return { ok: false, why: 'Nobody to talk to' }
+  const rack = w.rackById.get(c.rackId)
+  if (c.talked) return { ok: false, why: `Already promised a fix – REPAIR ${rack?.name ?? 'the rack'}` }
+  return { ok: true, why: `+${TALK_BONUS} s patience – then REPAIR ${rack?.name ?? 'the rack'}` }
+}
+
+/** TALK: calms a customer once – more patience while the fix is on its way. */
+export function talkTo(w: World, id: string): boolean {
+  if (!canTalk(w, id).ok) return false
+  const c = customerById(w, id)!
+  c.patience += TALK_BONUS
+  c.patienceMax = Math.max(c.patienceMax, c.patience)
+  c.talked = true
+  c.mood = 'calm'
+  c.moodT = 0
+  w.events.push({ kind: 'customerTalk', id: c.id, added: TALK_BONUS })
+  return true
+}
+
+/* ---------- virus (level 11+) ---------- */
+
+export const virusById = (w: World, id: string): Virus | undefined => w.viruses.find((v) => v.id === id)
+
+const neighbourCache = new WeakMap<World, Map<string, Rack[]>>()
+
+/** Racks that touch: the cabinets left and right in the row, and the ones in front and behind. */
+export function neighbours(w: World, r: Rack): Rack[] {
+  let map = neighbourCache.get(w)
+  if (!map) {
+    map = new Map()
+    for (const a of w.racks) {
+      map.set(
+        a.id,
+        w.racks.filter((b) => (b.cy === a.cy && Math.abs(b.cx - a.cx) === 1) || (b.cx === a.cx && Math.abs(b.cy - a.cy) === 3)),
+      )
+    }
+    neighbourCache.set(w, map)
+  }
+  return map.get(r.id) ?? []
+}
+
+function infect(w: World, r: Rack, source: 'virus' | 'spread', from: string): boolean {
+  if (r.infected) return false
+  r.infected = true
+  r.spreadT = SPREAD_TIME * (0.9 + w.rng() * 0.2)
+  w.infections++
+  addAlert(w, 'infected', r.id)
+  w.events.push({ kind: 'infect', rackId: r.id, source, from, first: w.infections === 1 })
+  return true
+}
+
+/** Puts malware on a rack directly (dev hook and tests). */
+export const infectRack = (w: World, rackId: string): boolean => {
+  const r = w.rackById.get(rackId)
+  return !!r && infect(w, r, 'virus', 'dev')
+}
+
+function spread(w: World, r: Rack) {
+  r.spreadT = SPREAD_TIME * (0.9 + w.rng() * 0.2)
+  const cands = neighbours(w, r).filter((n) => !n.infected)
+  if (!cands.length) return
+  // a running rack is a juicier target than a dark one
+  const live = cands.filter((n) => !n.down)
+  const pool = live.length ? live : cands
+  infect(w, pool[Math.floor(w.rng() * pool.length)], 'spread', r.id)
+}
+
+/** A virus crawls out of a network port (switch). */
+export function spawnVirus(w: World, stationId?: string): boolean {
+  const switches = w.stations.filter((s) => s.kind === 'switch')
+  const st = stationId ? switches.find((s) => s.id === stationId) : switches[Math.floor(w.rng() * switches.length)]
+  if (!st) return false
+  const cell = accessCell(w.hall, st.cx, st.cy, st.w, st.h, { x: st.cx + st.w / 2, y: st.cy + st.h }, st.facing)
+  if (!cell) return false
+  const v: Virus = {
+    id: `VIRUS${w.entitySeq++}`,
+    x: cell.x + 0.5,
+    y: cell.y + 0.5,
+    path: [],
+    mode: 'spawn',
+    rackId: null,
+    dwell: 0,
+    roam: 0,
+    spawnT: VIRUS_SPAWN_TIME,
+    speed: w.level.virusSpeed,
+    vx: 0,
+    vy: 0,
+    age: 0,
+    trail: [],
+    trailT: 0,
+    stationId: st.id,
+  }
+  w.viruses.push(v)
+  w.virusSpawns++
+  addAlert(w, 'virus', v.id)
+  w.events.push({ kind: 'virusSpawn', id: v.id, stationId: st.id, first: w.virusSpawns === 1 })
+  return true
+}
+
+/** Picks the next rack to infect – healthy and nearby ones first – and routes there. */
+function huntRack(w: World, v: Virus): boolean {
+  const taken = new Set<string>()
+  for (const o of w.viruses) if (o !== v && o.rackId) taken.add(o.rackId)
+  const vx = Math.floor(v.x)
+  const vy = Math.floor(v.y)
+  const cands: { v: Rack; wt: number }[] = []
+  for (const r of w.racks) {
+    if (r.infected || taken.has(r.id)) continue
+    const d = Math.abs(r.cx - vx) + Math.abs(r.cy + 1 - vy)
+    const healthy = !r.down && !r.perf && !w.alerts.some((a) => a.targetId === r.id)
+    cands.push({ v: r, wt: (healthy ? 4 : 1) / (1 + d / 5) })
+  }
+  while (cands.length) {
+    const i = pickWeighted(w, cands)
+    const r = cands[i].v
+    const cell = accessCell(w.hall, r.cx, r.cy, 1, 1, v)
+    const cells = cell ? findPath(w.hall, { x: vx, y: vy }, cell) : null
+    if (cells) {
+      v.mode = 'seek'
+      v.rackId = r.id
+      v.dwell = 0
+      v.path = smoothPath(w.hall, v, cells)
+      return true
+    }
+    cands.splice(i, 1)
+  }
+  return false
+}
+
+/** Wanders to a random aisle cell a few steps away. */
+function wander(w: World, v: Virus) {
+  const hall = w.hall
+  const vx = Math.floor(v.x)
+  const vy = Math.floor(v.y)
+  for (let tries = 0; tries < 16; tries++) {
+    const x = 1 + Math.floor(w.rng() * (hall.cols - 2))
+    const y = 1 + Math.floor(w.rng() * (hall.rows - 2))
+    const d = Math.abs(x - vx) + Math.abs(y - vy)
+    if (d < 3 || d > 8 || !isWalkable(hall, x, y)) continue
+    const cells = findPath(hall, { x: vx, y: vy }, { x, y })
+    if (cells) {
+      v.path = smoothPath(hall, v, cells)
+      return
+    }
+  }
+  v.path = []
+}
+
+function startRoam(w: World, v: Virus) {
+  v.mode = 'roam'
+  v.rackId = null
+  v.dwell = 0
+  v.roam = 4 + w.rng() * 3
+  wander(w, v)
+}
+
+function stepViruses(w: World, dt: number) {
+  const L = w.level
+  for (const r of w.racks) r.infecting = 0
+  if (w.spawnsEnabled && w.virusQueue.length && w.time < L.duration - 5) {
+    for (let i = w.virusQueue.length - 1; i >= 0; i--) {
+      if (w.time < w.virusQueue[i] || w.viruses.length >= L.viruses) continue
+      if (spawnVirus(w)) w.virusQueue.splice(i, 1)
+      else w.virusQueue[i] = w.time + 3
+    }
+  }
+  for (const v of w.viruses) {
+    v.age += dt
+    v.trailT -= dt
+    if (v.trailT <= 0) {
+      v.trailT = 0.05
+      v.trail.unshift({ x: v.x, y: v.y })
+      if (v.trail.length > 10) v.trail.pop()
+    }
+    if (v.mode === 'spawn') {
+      v.spawnT -= dt
+      if (v.spawnT <= 0 && !huntRack(w, v)) startRoam(w, v)
+      continue
+    }
+    const target = v.rackId ? w.rackById.get(v.rackId) : undefined
+    if (v.mode !== 'roam' && (!target || target.infected)) {
+      // somebody else got there first (or it was cleaned and re-infected): next rack
+      if (!huntRack(w, v)) startRoam(w, v)
+      continue
+    }
+    if (v.mode === 'dwell') {
+      v.vx = 0
+      v.vy = 0
+      v.dwell += dt
+      target!.infecting = Math.max(target!.infecting, Math.min(1, v.dwell / INFECT_TIME))
+      if (v.dwell >= INFECT_TIME) {
+        infect(w, target!, 'virus', v.id)
+        startRoam(w, v)
+      }
+      continue
+    }
+    if (v.mode === 'roam') v.roam -= dt
+    const step = walkAlong(v, v.speed, dt)
+    v.vx = dt > 0 ? step.x / dt : 0
+    v.vy = dt > 0 ? step.y / dt : 0
+    if (v.path.length) continue
+    if (v.mode === 'seek') {
+      v.mode = 'dwell'
+      v.dwell = 0
+    } else if (v.roam > 0) wander(w, v)
+    else if (!huntRack(w, v)) startRoam(w, v)
+  }
+}
+
+export const canCatch = (w: World, id: string) => !!virusById(w, id)
+
+/** Quarantines a virus (the technician touched it or zapped it). A new one comes 45–60 s later. */
+export function catchVirus(w: World, id: string): boolean {
+  const i = w.viruses.findIndex((v) => v.id === id)
+  if (i < 0) return false
+  const v = w.viruses[i]
+  w.viruses.splice(i, 1)
+  w.quarantined++
+  const a = alertFor(w, v.id, 'virus')
+  if (a) resolveAlert(w, a, true)
+  w.virusQueue.push(w.time + VIRUS_RESPAWN_MIN + w.rng() * (VIRUS_RESPAWN_MAX - VIRUS_RESPAWN_MIN))
+  w.events.push({ kind: 'quarantine', id: v.id, x: v.x, y: v.y, credits: REWARD.virus })
+  return true
 }
 
 /* ---------- upgrades ---------- */
@@ -721,12 +1308,18 @@ function syncUpgradeAlert(w: World) {
 /* ---------- queries for the HUD and the renderer ---------- */
 
 export function targetName(w: World, id: string): string {
+  if (customerById(w, id)) return 'the customer'
+  if (virusById(w, id)) return 'the virus'
   return w.rackById.get(id)?.name ?? w.stationById.get(id)?.name ?? id
 }
 
 export const alertSeverity = (w: World, a: Alert): 'info' | 'warn' | 'critical' => {
   if (a.type === 'upgrade') return 'info'
-  if (a.type === 'down') return 'critical'
+  if (a.type === 'down' || a.type === 'infected' || a.type === 'virus') return 'critical'
+  if (a.type === 'customer') {
+    const c = customerFor(w, a.targetId)
+    return c && c.patience < 10 ? 'critical' : 'warn'
+  }
   const s = w.stationById.get(a.targetId)
   if (a.type === 'power') return !s || s.battery <= Math.min(8, w.level.battery * 0.5) ? 'critical' : 'warn'
   const r = w.rackById.get(a.targetId)

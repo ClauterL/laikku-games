@@ -14,6 +14,8 @@
   --c-power: #ffb020;
   --c-net: #39ff7a;
   --c-alert: #ff2d3a;
+  --c-customer: #ff6ec7;
+  --c-virus: #b04dff;
   --glass: rgba(9, 12, 17, 0.9);
   --glass-2: rgba(16, 20, 28, 0.94);
   --line: rgba(130, 150, 180, 0.3);
@@ -48,6 +50,12 @@
 }
 .uptime-keeper .tone-alert {
   --tone: var(--c-alert);
+}
+.uptime-keeper .tone-customer {
+  --tone: var(--c-customer);
+}
+.uptime-keeper .tone-virus {
+  --tone: var(--c-virus);
 }
 
 /* Red vignette while a rack is critical: a static gradient whose opacity the
@@ -484,6 +492,74 @@
   --tone: var(--c-net);
 }
 
+.uptime-keeper .uk-obj.type-customer {
+  --tone: var(--c-customer);
+}
+
+.uptime-keeper .uk-obj.type-infected,
+.uptime-keeper .uk-obj.type-virus {
+  --tone: var(--c-virus);
+}
+
+.uptime-keeper .uk-obj {
+  position: relative;
+}
+
+.uptime-keeper .uk-obj.has-meter {
+  padding-bottom: 12px;
+}
+
+/* countdown under a row: customer patience, time until malware spreads */
+.uptime-keeper .uk-obj__meter {
+  position: absolute;
+  left: 62px;
+  right: 30px;
+  bottom: 5px;
+  height: 3px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.1);
+  overflow: hidden;
+}
+
+.uptime-keeper .uk-obj__meter i {
+  display: block;
+  height: 100%;
+  background: var(--tone);
+  box-shadow: 0 0 6px var(--tone);
+  transition: width 0.25s linear;
+}
+
+.uptime-keeper .uk-obj.is-critical .uk-obj__meter i {
+  background: var(--c-alert);
+  box-shadow: 0 0 6px var(--c-alert);
+}
+
+/* an escalated customer: crossed out for a few seconds, then gone */
+.uptime-keeper .uk-obj.is-failed {
+  --tone: var(--c-alert);
+  cursor: default;
+  background: rgba(255, 45, 58, 0.1);
+  animation: uk-failed 4.5s ease-in both;
+}
+
+.uptime-keeper .uk-obj.is-failed .uk-obj__text b {
+  text-decoration: line-through;
+  text-decoration-thickness: 2px;
+  color: #ff8a92;
+}
+
+.uptime-keeper .uk-obj__tag {
+  flex: none;
+  padding: 3px 7px;
+  border: 1px solid var(--c-alert);
+  border-radius: 999px;
+  color: #ff8a92;
+  font-size: 10.5px;
+  font-weight: 900;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
 .uptime-keeper .uk-obj:hover,
 .uptime-keeper .uk-obj.is-selected {
   background: color-mix(in srgb, var(--tone) 14%, transparent);
@@ -639,6 +715,17 @@
 .uptime-keeper .uk-act--upgrade {
   --tone: #39ff7a;
   --deep: #0a7a2c;
+}
+
+/* REPAIR as the context action: TALK to a customer, ZAP the virus */
+.uptime-keeper .uk-act.ctx-talk {
+  --tone: #ff6ec7;
+  --deep: #8f1563;
+}
+
+.uptime-keeper .uk-act.ctx-zap {
+  --tone: #c77dff;
+  --deep: #5a1a9e;
 }
 
 .uptime-keeper .uk-act:active {
@@ -1256,6 +1343,18 @@
   display: none;
 }
 
+.uptime-keeper.layout-portrait .uk-obj__meter {
+  left: 38px;
+  right: 14px;
+  bottom: 4px;
+  height: 2.5px;
+}
+
+.uptime-keeper.layout-portrait .uk-obj__tag {
+  padding: 2px 6px;
+  font-size: 9.5px;
+}
+
 .uptime-keeper.layout-portrait .uk-obj-empty {
   height: 40px;
   padding: 0 14px;
@@ -1557,6 +1656,18 @@
   display: none;
 }
 
+.uptime-keeper.layout-landscape .uk-obj__meter {
+  left: 43px;
+  right: 8px;
+  bottom: 3px;
+  height: 2.5px;
+}
+
+.uptime-keeper.layout-landscape .uk-obj__tag {
+  padding: 2px 5px;
+  font-size: 9px;
+}
+
 .uptime-keeper.layout-landscape .uk-obj-empty {
   padding: 8px;
   font-size: 11.5px;
@@ -1708,6 +1819,16 @@
   100% {
     opacity: 0;
     transform: translateY(-10px);
+  }
+}
+
+@keyframes uk-failed {
+  0%,
+  80% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0.25;
   }
 }
 

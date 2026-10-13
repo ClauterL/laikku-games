@@ -1,6 +1,8 @@
 import { Suspense, lazy } from 'react'
 import { HashRouter, Navigate, Route, Routes } from 'react-router-dom'
 import { Hub } from './hub/Hub'
+import { PresenceTracker } from './shared/PresenceTracker'
+import { ScoreToast } from './shared/ScoreToast'
 
 // Each game is its own lazy chunk so the hub loads instantly.
 const TicketSlash = lazy(() => import('./games/ticket-slash/TicketSlash'))
@@ -17,9 +19,12 @@ function Loading() {
 export default function App() {
   return (
     <HashRouter>
+      {/* online layer (docs/ONLINE.md): heartbeat + leaderboard toast, both silent when offline */}
+      <PresenceTracker />
       <Suspense fallback={<Loading />}>
         <Routes>
           <Route path="/" element={<Hub />} />
+          <Route path="/leaderboard/:game?" element={<Hub />} />
           <Route path="/ticket-slash" element={<TicketSlash />} />
           <Route path="/network-connect" element={<NetworkConnect />} />
           <Route path="/access-crossing" element={<AccessCrossing />} />
@@ -30,6 +35,7 @@ export default function App() {
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </Suspense>
+      <ScoreToast />
     </HashRouter>
   )
 }
